@@ -337,7 +337,7 @@ def booking_management():
 
 def orders_page():
     st.subheader("Orders & Excel upload")
-    st.write("Upload an Excel workbook with supplier_code, po_number, product, delivery_type, quantity, due_date, latest_delivery_date and booking_permitted.")
+    st.write("Upload the weekly PO workbook. The system previews changes and flags missing POs or quantity conflicts before anything is updated.")
     template=pd.DataFrame(columns=["supplier_code","po_number","product","delivery_type","quantity","quantity_unit","due_date","latest_delivery_date","booking_permitted"])
     buffer=BytesIO()
     with pd.ExcelWriter(buffer,engine="openpyxl") as writer:
@@ -350,36 +350,97 @@ def orders_page():
             st.dataframe(incoming,use_container_width=True)
             required={"supplier_code","po_number","product"}
             missing=required-set(incoming.columns)
-            if missing: st.error("Missing columns: "+", ".join(sorted(missing)))
-            elif st.button("Validate and import purchase orders",type="primary"):
+            if missing:
+                st.error("Missing columns: "+", ".join(sorted(missing)))
+            elif st.button("Compare workbook with current open POs",type="primary"):
                 suppliers={x["supplier_code"]:x for x in rows("suppliers")}
                 products={x["name"].lower():x for x in rows("products")}
-                imported=0; issues=[]
+                existing=rows("purchase_orders")
+                existing_map={(x["supplier_id"],x["po_number"],x["product_id"]):x for x in existing}
+                candidates=[]; incoming_keys=set(); row_issues=[]
+                batch=db().table("po_import_batches").insert({"file_name":up.name,"uploaded_by_role":st.session_state.get("auth_role","material_controller"),"status":"preview","rows_total":len(incoming)}).execute().data
+                batch_id=batch[0]["id"] if batch else None
                 for idx,row in incoming.iterrows():
                     code=str(row.get("supplier_code","")).strip()
                     po=str(row.get("po_number","")).strip()
                     prod=products.get(str(row.get("product","")).strip().lower())
                     sup=suppliers.get(code)
                     if not sup or not po or not prod:
-                        issues.append(f"Row {idx+2}: supplier, PO number or product could not be matched."); continue
+                        row_issues.append({"row":int(idx)+2,"issue":"Supplier, PO number or product could not be matched."}); continue
                     def val(k):
                         v=row.get(k)
-                        if pd.isna(v): return None
+                        if v is None or pd.isna(v): return None
                         if k in ("due_date","latest_delivery_date"): return pd.to_datetime(v).date().isoformat()
                         return v
-                    payload={"supplier_id":sup["id"],"po_number":po,"product_id":prod["id"],"delivery_type":None if pd.isna(row.get("delivery_type")) else str(row.get("delivery_type")),"quantity":val("quantity"),"quantity_unit":prod.get("quantity_unit"),"due_date":val("due_date"),"latest_delivery_date":val("latest_delivery_date"),"booking_permitted":bool(row.get("booking_permitted",True)),"source_file_name":up.name,"status":"open"}
-                    try:
-                        db().table("purchase_orders").upsert(payload,on_conflict="supplier_id,po_number,product_id").execute(); imported+=1
-                    except Exception as ex: issues.append(f"Row {idx+2}: {type(ex).__name__}")
-                st.success(f"Imported or updated {imported} purchase orders.")
-                if issues: st.warning("\\n".join(issues))
-        except Exception as e: st.error(f"Could not read workbook: {e}")
+                    key=(sup["id"],po,prod["id"]); incoming_keys.add(key)
+                    old=existing_map.get(key)
+                    payload={"supplier_id":sup["id"],"po_number":po,"product_id":prod["id"],"delivery_type":None if val("delivery_type") is None else str(val("delivery_type")),"quantity":val("quantity"),"quantity_unit":val("quantity_unit") or prod.get("quantity_unit"),"due_date":val("due_date"),"latest_delivery_date":val("latest_delivery_date"),"booking_permitted":True if val("booking_permitted") is None else bool(val("booking_permitted")),"source_file_name":up.name,"status":old.get("status","open") if old else "open"}
+                    conflict=None
+                    if old and old.get("quantity") is not None and payload["quantity"] is not None and float(payload["quantity"])<float(old["quantity"]):
+                        linked=[b for b in rows("bookings") if b.get("purchase_order_id")==old["id"] and b.get("status") in ("requested","alternative_proposed","confirmed","completed")]
+                        committed=sum(float(b.get("quantity") or 0) for b in linked)
+                        if float(payload["quantity"])<committed:
+                            conflict={"po_number":po,"supplier":sup["name"],"new_quantity":payload["quantity"],"committed_quantity":committed,"existing_quantity":old["quantity"],"purchase_order_id":old["id"],"supplier_id":sup["id"]}
+                            payload["quantity"]=old["quantity"]
+                    candidates.append({"payload":payload,"old":old,"conflict":conflict,"key":key})
+                missing_pos=[x for x in existing if x.get("status")=="open" and (x["supplier_id"],x["po_number"],x["product_id"]) not in incoming_keys]
+                st.session_state["po_import_preview"]={"batch_id":batch_id,"file_name":up.name,"candidates":candidates,"missing":missing_pos,"row_issues":row_issues}
+                st.rerun()
+        except Exception as e:
+            st.error(f"Could not read workbook: {e}")
+    preview=st.session_state.get("po_import_preview")
+    if preview:
+        st.markdown("### Import review")
+        st.write(f'Workbook: **{preview["file_name"]}** · {len(preview["candidates"])} matched row(s)')
+        if preview["row_issues"]:
+            st.warning("Rows needing correction: "+ " · ".join(f'Row {x["row"]}: {x["issue"]}' for x in preview["row_issues"]))
+        conflicts=[x for x in preview["candidates"] if x["conflict"]]
+        if conflicts:
+            st.warning("Quantity reductions below already booked or delivered quantities have been detected. The existing PO quantity will be retained for those rows; the lower figure will not be applied.")
+            for item in conflicts:
+                c=item["conflict"]
+                st.write(f'**{c["supplier"]} · PO {c["po_number"]}** — uploaded {c["new_quantity"]}; already committed {c["committed_quantity"]}; existing PO quantity {c["existing_quantity"]}.')
+        if preview["missing"]:
+            st.markdown("### Open POs missing from this upload")
+            st.caption("Nothing will be closed automatically. Choose what should happen to each missing PO.")
+            suppliers={x["id"]:x for x in rows("suppliers")}
+            products={x["id"]:x for x in rows("products")}
+            for item in preview["missing"]:
+                label=f'{suppliers.get(item["supplier_id"],{}).get("name","Supplier")} · {item["po_number"]} · {products.get(item["product_id"],{}).get("name","Product")} · outstanding PO quantity {item.get("quantity")}'
+                st.selectbox(label,["Keep open","Close PO","Investigate"],key=f'po_missing_{item["id"]}')
+        if st.button("Confirm PO updates",type="primary"):
+            created=updated=0
+            for item in preview["candidates"]:
+                payload=item["payload"]
+                try:
+                    db().table("purchase_orders").upsert(payload,on_conflict="supplier_id,po_number,product_id").execute()
+                    if item["old"]: updated+=1
+                    else: created+=1
+                    if item["conflict"]:
+                        c=item["conflict"]
+                        db().table("po_import_issues").insert({"batch_id":preview["batch_id"],"purchase_order_id":c["purchase_order_id"],"supplier_id":c["supplier_id"],"po_number":c["po_number"],"issue_type":"quantity_below_committed","details":c,"resolution":"kept_existing_quantity","resolution_reason":"Uploaded quantity was below booked/delivered quantity; existing PO quantity retained.","resolved_by_role":st.session_state.get("auth_role"),"resolved_at":local_now().isoformat()}).execute()
+                except Exception as ex:
+                    st.error(f'Could not update PO {payload["po_number"]}: {type(ex).__name__}')
+            for item in preview["missing"]:
+                decision=st.session_state.get(f'po_missing_{item["id"]}',"Keep open")
+                resolution={"Keep open":"kept_open","Close PO":"closed_by_material_controller","Investigate":"investigation_required"}[decision]
+                if decision=="Close PO":
+                    db().table("purchase_orders").update({"status":"closed","booking_permitted":False,"updated_at":local_now().isoformat()}).eq("id",item["id"]).eq("status","open").execute()
+                supplier=one("suppliers",id=item["supplier_id"])
+                db().table("po_import_issues").insert({"batch_id":preview["batch_id"],"purchase_order_id":item["id"],"supplier_id":item["supplier_id"],"po_number":item["po_number"],"issue_type":"missing_from_weekly_upload","details":{"supplier":supplier["name"] if supplier else ""},"resolution":resolution,"resolved_by_role":st.session_state.get("auth_role"),"resolved_at":local_now().isoformat() if decision!="Investigate" else None}).execute()
+            db().table("po_import_batches").update({"status":"applied","rows_created":created,"rows_updated":updated,"rows_flagged":len(conflicts)+len(preview["missing"])+len(preview["row_issues"]),"applied_at":local_now().isoformat()}).eq("id",preview["batch_id"]).execute()
+            st.session_state.pop("po_import_preview",None)
+            st.success(f"PO import complete: {created} new, {updated} updated. Missing POs were handled using your decisions; existing booking history was preserved.")
+            st.rerun()
+        if st.button("Discard preview"):
+            st.session_state.pop("po_import_preview",None)
+            st.rerun()
     st.markdown("### Current purchase orders")
     orders=rows("purchase_orders")
     out=[]
     for x in orders:
         s=one("suppliers",id=x["supplier_id"]); p=one("products",id=x["product_id"])
-        out.append({"Supplier":s["name"] if s else "","PO":x["po_number"],"Product":p["name"] if p else "","Quantity":x.get("quantity"),"Due":x.get("due_date"),"Latest":x.get("latest_delivery_date"),"Booking allowed":x.get("booking_permitted")})
+        out.append({"Supplier":s["name"] if s else "","PO":x["po_number"],"Product":p["name"] if p else "","Quantity":x.get("quantity"),"Due":x.get("due_date"),"Latest":x.get("latest_delivery_date"),"Status":x.get("status"),"Booking allowed":x.get("booking_permitted")})
     if out: st.dataframe(pd.DataFrame(out),use_container_width=True,hide_index=True)
 
 def warehouse_page():
