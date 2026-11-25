@@ -238,7 +238,7 @@ def calendar_page(public=False):
 
 def booking_management():
     st.subheader("Booking management")
-    pending=[b for b in rows("bookings") if b.get("status") in ("requested","alternative_proposed")]
+    pending=[b for b in rows("bookings") if b.get("status")=="requested"]
     if not pending: st.info("There are no booking requests awaiting a decision.")
     for b in pending:
         product=one("products",id=b["product_id"]); supplier=one("suppliers",id=b["supplier_id"])
