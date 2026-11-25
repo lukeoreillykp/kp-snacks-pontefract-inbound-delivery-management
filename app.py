@@ -263,23 +263,13 @@ def booking_management():
             st.write(f"Requested time: {fmt(ch['proposed_start'])}")
             x1,x2=st.columns(2)
             if x1.button("Approve change request",key=f"change_ok_{ch['id']}"):
-                is_cancel=(ch.get("reason") or "").startswith("CANCEL_REQUEST:")
-                if is_cancel:
-                    db().table("bookings").update({"status":"cancelled","cancelled_at":local_now().isoformat(),"updated_at":local_now().isoformat()}).eq("id",b["id"]).execute()
-                    log_event(b["id"],"supplier_cancellation_approved",b["status"],"cancelled",ch.get("reason"))
-                    enqueue_status_email(b,"cancelled")
-                else:
-                    area=one("delivery_areas",id=b["delivery_area_id"])
-                    proposed=datetime.fromisoformat(ch["proposed_start"].replace("Z","+00:00")).astimezone(TZ)
-                    ok,msg=capacity_check(b["delivery_area_id"],proposed,int(ch["proposed_duration_minutes"]),int(b.get("buffer_minutes") or (area or {}).get("buffer_minutes",20)),ignore_id=b["id"])
-                    if not ok:
-                        st.error("Cannot approve this amendment: "+msg)
-                        continue
-                    db().table("bookings").update({"scheduled_start":ch["proposed_start"],"scheduled_end":ch["proposed_end"],"duration_minutes":ch["proposed_duration_minutes"],"updated_at":local_now().isoformat()}).eq("id",b["id"]).execute()
-                    log_event(b["id"],"supplier_amendment_approved",b["status"],b["status"],ch.get("reason"))
-                    enqueue_status_email(b,"confirmed")
-                db().table("booking_change_requests").update({"status":"approved","reviewed_at":local_now().isoformat(),"manager_response":"Approved"}).eq("id",ch["id"]).execute()
-                st.rerun()
+                try:
+                    updated=db().rpc("approve_inbound_change",{"p_change_id":ch["id"]}).execute().data
+                    updated=updated if isinstance(updated,dict) else (updated[0] if updated else b)
+                    enqueue_status_email(updated,updated["status"])
+                    st.success("Change request approved."); st.rerun()
+                except Exception as e:
+                    st.error(f"Change request could not be approved: {e}")
             if x2.button("Reject change request",key=f"change_no_{ch['id']}"):
                 db().table("booking_change_requests").update({"status":"rejected","reviewed_at":local_now().isoformat(),"manager_response":"Rejected by site team"}).eq("id",ch["id"]).execute()
                 log_event(b["id"],"supplier_change_rejected",b["status"],b["status"],"Supplier change request rejected")
