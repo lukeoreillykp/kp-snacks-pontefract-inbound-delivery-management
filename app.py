@@ -586,15 +586,24 @@ def rules_page():
 
 def suppliers_page():
     st.subheader("Supplier management")
-    setting=one("app_settings",setting_key="internal_notification_email")
-    current_email=setting.get("setting_value") if setting else ""
-    if isinstance(current_email,dict): current_email=current_email.get("email","")
-    with st.form("internal_notification_email"):
-        site_email=st.text_input("Internal booking notification email",value=str(current_email or ""))
-        save_email=st.form_submit_button("Save notification address")
-    if save_email:
-        db().table("app_settings").upsert({"setting_key":"internal_notification_email","setting_value":site_email.strip(),"description":"Recipient for inbound supplier booking and change request notifications."},on_conflict="setting_key").execute()
-        st.success("Internal notification address saved."); st.rerun()
+    setting=one("app_settings",setting_key="internal_notification_emails")
+    current=setting.get("setting_value") if setting else None
+    if not current:
+        legacy=one("app_settings",setting_key="internal_notification_email")
+        current=legacy.get("setting_value") if legacy else ""
+    if isinstance(current,list): current=", ".join(current)
+    elif isinstance(current,dict): current=current.get("emails") or current.get("email") or ""
+    st.caption("Send internal booking and exception notifications to one or more addresses.")
+    with st.form("internal_notification_recipients"):
+        addresses=st.text_input("Notification email addresses (comma-separated)",value=str(current or ""))
+        save_addresses=st.form_submit_button("Save notification recipients")
+    if save_addresses:
+        recipients=[x.strip() for x in addresses.replace(";",",").split(",") if x.strip()]
+        invalid=[x for x in recipients if "@" not in x or "." not in x.split("@")[-1]]
+        if invalid: st.error("Check these email addresses: "+", ".join(invalid))
+        else:
+            db().table("app_settings").upsert({"setting_key":"internal_notification_emails","setting_value":recipients,"description":"Recipients for inbound booking and change request notifications."},on_conflict="setting_key").execute()
+            st.success("Notification recipients saved."); st.rerun()
     with st.form("supplier_new"):
         code=st.text_input("Supplier code"); name=st.text_input("Supplier name"); email=st.text_input("Contact email"); phone=st.text_input("Phone")
         add=st.form_submit_button("Add supplier")
