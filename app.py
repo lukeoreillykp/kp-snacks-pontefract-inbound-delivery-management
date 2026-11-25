@@ -391,8 +391,7 @@ def warehouse_page():
         if save:
             if end<start: st.error("End date must be on or after start date.")
             else:
-                shift=shifts[0]
-                db().table("staff_shift_assignments").insert({"staff_member_id":selected["id"],"shift_id":shift["id"],"starts_at":datetime.combine(start,time(0),TZ).isoformat(),"ends_at":datetime.combine(end+timedelta(days=1),time(0),TZ).isoformat(),"assignment_type":typ,"notes":note}).execute()
+                db().table("staff_shift_assignments").insert({"staff_member_id":selected["id"],"shift_id":selected_shift["id"],"starts_at":datetime.combine(start,time(0),TZ).isoformat(),"ends_at":datetime.combine(end+timedelta(days=1),time(0),TZ).isoformat(),"assignment_type":typ,"notes":note}).execute()
                 st.success("Absence record saved."); st.rerun()
 
 def rules_page():
