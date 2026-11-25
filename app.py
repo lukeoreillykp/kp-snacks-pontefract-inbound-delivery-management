@@ -128,6 +128,18 @@ def enqueue_status_email(booking, status):
 
 def save_role_access():
     st.subheader("Shared role access")
+    admin_rec=credential("administrator") or {}
+    with st.expander("Change Administrator password"):
+        with st.form("admin_password_change"):
+            admin_p1=st.text_input("New Administrator password (minimum 12 characters)",type="password")
+            admin_p2=st.text_input("Confirm Administrator password",type="password")
+            admin_save=st.form_submit_button("Update Administrator password")
+        if admin_save:
+            if len(admin_p1)<12 or admin_p1!=admin_p2: st.error("Passwords must match and be at least 12 characters.")
+            else:
+                db().table("internal_role_credentials").update({"password_hash":pw_hash(admin_p1),"password_changed_at":local_now().isoformat(),"updated_at":local_now().isoformat()}).eq("role","administrator").execute()
+                audit_password("administrator","password_changed")
+                st.success("Administrator password updated."); st.rerun()
     for role in ROLES:
         if role=="administrator": continue
         rec=credential(role) or {"enabled":False,"password_hash":None}
