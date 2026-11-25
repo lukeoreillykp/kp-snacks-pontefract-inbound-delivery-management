@@ -402,7 +402,7 @@ def warehouse_page():
             payload={"plan_date":day.isoformat(),"shift_id":shift["id"],"main_team_headcount":head,"people_on_holiday":holiday,"additional_operator_available":extra,"additional_operator_count":1 if extra else 0,"bulk_operator_available":bulk,"protected_outbound_headcount":2,"notes":note}
             db().table("staffing_plans").upsert(payload,on_conflict="plan_date,shift_id").execute()
             st.success(f"{shift['display_name']} staffing saved."); st.rerun()
-    st.caption("Capacity planning protects two people for outbound/palletisation. The weekly rotation anchor and individual staff names still need to be configured before automatic operator allocation is enabled.")
+    st.caption("Capacity planning protects two people for outbound/palletisation. The absence register is a record; update the shift plan's headcount and holiday count so the capacity calculation reflects planned cover. The weekly rotation anchor is not configured, so staffing plans are entered by date rather than auto-generated.")
     st.markdown("### Staff / absence register")
     with st.form("staff_add"):
         name=st.text_input("Staff display name")
