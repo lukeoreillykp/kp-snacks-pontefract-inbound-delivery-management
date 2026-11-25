@@ -251,6 +251,33 @@ def booking_management():
             db().table("bookings").update({"status":"alternative_proposed","scheduled_start":start.isoformat(),"scheduled_end":(start+timedelta(minutes=b["duration_minutes"])).isoformat(),"internal_notes":reason,"updated_at":local_now().isoformat()}).eq("id",b["id"]).execute()
             log_event(b["id"],"alternative_proposed",b["status"],"alternative_proposed",reason); enqueue_status_email(b,"alternative_proposed")
             st.session_state.pop("alt_id"); st.rerun()
+    st.markdown("### Supplier amendments and cancellation requests")
+    changes=[x for x in rows("booking_change_requests") if x.get("status") in ("pending","alternative_proposed")]
+    for ch in changes:
+        b=one("bookings",id=ch["booking_id"])
+        if not b: continue
+        supplier=one("suppliers",id=b["supplier_id"])
+        with st.container(border=True):
+            st.write(f"**{b['booking_reference']} · {supplier['name'] if supplier else 'Supplier'}**")
+            st.write(ch.get("reason") or "Change request")
+            st.write(f"Requested time: {fmt(ch['proposed_start'])}")
+            x1,x2=st.columns(2)
+            if x1.button("Approve change request",key=f"change_ok_{ch['id']}"):
+                is_cancel=(ch.get("reason") or "").startswith("CANCEL_REQUEST:")
+                if is_cancel:
+                    db().table("bookings").update({"status":"cancelled","cancelled_at":local_now().isoformat(),"updated_at":local_now().isoformat()}).eq("id",b["id"]).execute()
+                    log_event(b["id"],"supplier_cancellation_approved",b["status"],"cancelled",ch.get("reason"))
+                    enqueue_status_email(b,"cancelled")
+                else:
+                    db().table("bookings").update({"scheduled_start":ch["proposed_start"],"scheduled_end":ch["proposed_end"],"duration_minutes":ch["proposed_duration_minutes"],"updated_at":local_now().isoformat()}).eq("id",b["id"]).execute()
+                    log_event(b["id"],"supplier_amendment_approved",b["status"],b["status"],ch.get("reason"))
+                    enqueue_status_email(b,"confirmed")
+                db().table("booking_change_requests").update({"status":"approved","reviewed_at":local_now().isoformat(),"manager_response":"Approved"}).eq("id",ch["id"]).execute()
+                st.rerun()
+            if x2.button("Reject change request",key=f"change_no_{ch['id']}"):
+                db().table("booking_change_requests").update({"status":"rejected","reviewed_at":local_now().isoformat(),"manager_response":"Rejected by site team"}).eq("id",ch["id"]).execute()
+                log_event(b["id"],"supplier_change_rejected",b["status"],b["status"],"Supplier change request rejected")
+                enqueue_status_email(b,"confirmed"); st.rerun()
     st.divider()
     st.markdown("### Create manual booking")
     suppliers=rows("suppliers"); products=rows("products")
@@ -463,9 +490,36 @@ def supplier_portal():
             out=[]
             for b in mine:
                 p=one("products",id=b["product_id"])
-                out.append({"Reference":b["booking_reference"],"PO":one("purchase_orders",id=b["purchase_order_id"])["po_number"] if b.get("purchase_order_id") and one("purchase_orders",id=b["purchase_order_id"]) else "Manual","Product":p["name"] if p else "","Arrival":fmt(b["scheduled_start"]),"Status":b["status"].replace("_"," ").title()})
+                po=one("purchase_orders",id=b["purchase_order_id"]) if b.get("purchase_order_id") else None
+                out.append({"Reference":b["booking_reference"],"PO":po["po_number"] if po else "Manual","Product":p["name"] if p else "","Arrival":fmt(b["scheduled_start"]),"Status":b["status"].replace("_"," ").title()})
             st.dataframe(pd.DataFrame(out),use_container_width=True,hide_index=True)
-            st.caption("Amendments and cancellations are requests only and require site approval. Requests must be made at least 48 hours before delivery.")
+            eligible=[]
+            for b in mine:
+                try: future=datetime.fromisoformat(b["scheduled_start"].replace("Z","+00:00")).astimezone(TZ)>local_now()+timedelta(hours=48)
+                except Exception: future=False
+                if future and b["status"]=="confirmed": eligible.append(b)
+            if eligible:
+                with st.form("supplier_change_request"):
+                    chosen=st.selectbox("Booking to amend or cancel",eligible,format_func=lambda x:f"{x['booking_reference']} · {fmt(x['scheduled_start'])}")
+                    action=st.radio("Request type",["Change arrival time","Cancel booking"])
+                    new_day=st.date_input("New date",value=local_now().date()+timedelta(days=7))
+                    new_time=st.time_input("New arrival time",value=time(8,0))
+                    reason=st.text_input("Reason / message for site team")
+                    submit=st.form_submit_button("Submit request")
+                if submit:
+                    if not reason.strip(): st.error("Please enter a reason.")
+                    elif action=="Change arrival time" and datetime.combine(new_day,new_time,TZ)<local_now()+timedelta(days=7): st.error("Amended bookings must still be at least seven days ahead.")
+                    else:
+                        if action=="Cancel booking":
+                            proposed_start=chosen["scheduled_start"]; proposed_end=chosen["scheduled_end"]; proposed_duration=chosen["duration_minutes"]
+                            reason_text="CANCEL_REQUEST: "+reason
+                        else:
+                            proposed_start=datetime.combine(new_day,new_time,TZ).isoformat()
+                            proposed_end=(datetime.fromisoformat(proposed_start)+timedelta(minutes=chosen["duration_minutes"])).isoformat()
+                            proposed_duration=chosen["duration_minutes"]; reason_text=reason
+                        db().table("booking_change_requests").insert({"booking_id":chosen["id"],"status":"pending","proposed_start":proposed_start,"proposed_end":proposed_end,"proposed_duration_minutes":proposed_duration,"reason":reason_text}).execute()
+                        st.success("Request sent to the site team. Your existing confirmed booking remains in place until approved.")
+            else: st.caption("Only confirmed bookings more than 48 hours away can be amended or cancelled here.")
         else: st.info("No bookings yet.")
     with tabs[2]:
         own=[x for x in rows("purchase_orders") if x["supplier_id"]==s["id"]]
