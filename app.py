@@ -691,12 +691,11 @@ def main():
             if st.button("Sign out",use_container_width=True):
                 st.session_state.pop("auth_role",None); st.session_state.pop("supplier_id",None); st.rerun()
             choices=[x for x in PAGES if x in ROLE_PAGES.get(role,set())]
-        else: choices=["Dashboard","Delivery calendar","Supplier portal"]
+        else: choices=["Dashboard","Delivery calendar"]
         page=st.radio("Navigation",choices)
     if not connected: return
     if page=="Dashboard": dashboard(public=not bool(role))
     elif page=="Delivery calendar": calendar_page(public=not bool(role))
-    elif page=="Supplier portal": supplier_portal()
     elif not role:
         st.info("Sign in below for internal operational access.")
         if credential("administrator"): sign_in()
