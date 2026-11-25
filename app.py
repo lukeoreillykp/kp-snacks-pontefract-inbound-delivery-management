@@ -83,6 +83,25 @@ def df(table, select="*"):
 def local_now():
     return datetime.now(TZ)
 
+def team_captain_for_shift(shift_code, on_date):
+    config=one("app_settings",setting_key="team_captain_rota")
+    config=(config or {}).get("setting_value") or {}
+    if not isinstance(config,dict) or not config.get("anchor_week_start") or not config.get("teams"):
+        return None
+    try:
+        anchor=date.fromisoformat(config["anchor_week_start"])
+        weeks=(on_date-anchor).days//7
+        rotation=config.get("rotation") or {"days":"nights","nights":"afternoons","afternoons":"days"}
+        for team,details in config["teams"].items():
+            current=details.get("shift")
+            for _ in range(weeks % 3):
+                current=rotation.get(current,current)
+            if current==shift_code:
+                return {"team":team.title(),"captain":details.get("captain")}
+    except Exception:
+        return None
+    return None
+
 def fmt(dt):
     try: return datetime.fromisoformat(str(dt).replace("Z","+00:00")).astimezone(TZ).strftime("%d/%m/%Y %H:%M")
     except Exception: return str(dt)
@@ -468,6 +487,9 @@ def warehouse_page():
     current=[x for x in rows("staffing_plans") if x["plan_date"]==day.isoformat()]
     for shift in shifts:
         existing=next((x for x in current if x["shift_id"]==shift["id"]),None)
+        captain=team_captain_for_shift(shift["shift_code"],day)
+        if captain and captain.get("captain"):
+            st.caption(f"{captain['team']} Team · Team Captain: {captain['captain']}")
         with st.form(f"staff_{shift['shift_code']}"):
             st.markdown(f"**{shift['display_name']}**")
             defaults={"days":4,"afternoons":3,"nights":4}
@@ -482,7 +504,7 @@ def warehouse_page():
             payload={"plan_date":day.isoformat(),"shift_id":shift["id"],"main_team_headcount":head,"people_on_holiday":holiday,"additional_operator_available":extra,"additional_operator_count":1 if extra else 0,"bulk_operator_available":bulk,"protected_outbound_headcount":2,"notes":note}
             db().table("staffing_plans").upsert(payload,on_conflict="plan_date,shift_id").execute()
             st.success(f"{shift['display_name']} staffing saved."); st.rerun()
-    st.caption("Capacity planning protects two people for outbound/palletisation. The absence register is a record; update the shift plan's headcount and holiday count so the capacity calculation reflects planned cover. The weekly rotation anchor is not configured, so staffing plans are entered by date rather than auto-generated.")
+    st.caption("Capacity planning protects two people for outbound/palletisation. The red/blue/yellow Team Captain rota is calculated automatically from the configured weekly anchor. Staffing headcounts and absences remain entered by date.")
     st.markdown("### Staff / absence register")
     with st.form("staff_add"):
         name=st.text_input("Staff display name")
