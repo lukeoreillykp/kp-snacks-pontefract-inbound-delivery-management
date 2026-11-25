@@ -52,9 +52,9 @@ def build_message(item):
         if value:
             details.append(f"{label}: {value}")
     message.set_content(
-        "KP Snacks Pontefract inbound delivery notification\\n\\n"
-        + ("\\n".join(details) if details else "There is an update in the inbound delivery management system.")
-        + "\\n\\nThis is an automated notification. Please use the inbound delivery management app for the latest information."
+        "KP Snacks Pontefract inbound delivery notification\n\n"
+        + ("\n".join(details) if details else "There is an update in the inbound delivery management system.")
+        + "\n\nThis is an automated notification. Please use the inbound delivery management app for the latest information."
     )
     return message
 
