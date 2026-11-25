@@ -82,17 +82,29 @@ def request_booking(supplier,po,product,start,quantity,note):
     return booking
 
 def sign_in():
-    with st.form("supplier_login"):
-        code=st.text_input("Supplier code",help="Use the supplier code provided by the Pontefract site team.")
-        password=st.text_input("Supplier portal password",type="password")
-        submit=st.form_submit_button("Sign in",type="primary")
+    st.caption('Use the shared supplier login by default. Individual contacts can sign in with their email when enabled by the site team.')
+    with st.form('supplier_login'):
+        code=st.text_input('Supplier code')
+        email=st.text_input('Contact email (optional)')
+        password=st.text_input('Supplier portal password',type='password')
+        submit=st.form_submit_button('Sign in',type='primary')
     if submit:
-        supplier=one("suppliers",supplier_code=code.strip())
-        if supplier and supplier.get("active") and supplier.get("shared_login_enabled") and supplier.get("supplier_password_hash") and password_ok(password,supplier["supplier_password_hash"]):
-            st.session_state["supplier_id"]=supplier["id"]
+        supplier=one('suppliers',supplier_code=code.strip())
+        valid=False
+        contacts=[]
+        if supplier and supplier.get('active'):
+            if email.strip():
+                contacts=db().table('supplier_contacts').select('*').eq('supplier_id',supplier['id']).eq('email',email.strip()).eq('active',True).limit(1).execute().data or []
+                valid=bool(contacts and contacts[0].get('password_hash') and password_ok(password,contacts[0]['password_hash']))
+            elif supplier.get('shared_login_enabled') and supplier.get('supplier_password_hash'):
+                valid=password_ok(password,supplier['supplier_password_hash'])
+        if valid:
+            st.session_state['supplier_id']=supplier['id']
+            st.session_state['supplier_contact_id']=contacts[0]['id'] if email.strip() else None
+            st.session_state['supplier_contact_name']=contacts[0]['full_name'] if email.strip() else supplier['name']
             st.rerun()
         else:
-            st.error("Sign-in failed. Check your supplier code and password or contact the Pontefract site team.")
+            st.error('Sign-in failed. Check your supplier code, email and password or contact the Pontefract site team.')
 
 def portal(supplier):
     st.write(f"Signed in as **{supplier['name']}**")
@@ -265,8 +277,10 @@ def main():
         return
     supplier_id=st.session_state.get("supplier_id")
     supplier=one("suppliers",id=supplier_id) if supplier_id else None
-    if supplier and (not supplier.get("active") or not supplier.get("shared_login_enabled")):
+    if supplier and not supplier.get("active"):
         st.session_state.pop("supplier_id",None)
+        st.session_state.pop("supplier_contact_id",None)
+        st.session_state.pop("supplier_contact_name",None)
         supplier=None
     if supplier:
         portal(supplier)
