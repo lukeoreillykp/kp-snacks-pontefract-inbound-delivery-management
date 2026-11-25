@@ -1,7 +1,10 @@
 import hashlib
 import hmac
 import secrets
+import smtplib
+import ssl
 import uuid
+from email.message import EmailMessage
 from io import BytesIO
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -76,6 +79,49 @@ def queue_internal_email(subject, template, payload, booking_id=None, change_req
     recipients=raw if isinstance(raw,list) else str(raw or '').replace(';',',').split(',')
     for recipient in sorted({str(x).strip() for x in recipients if str(x).strip()}):
         db().table('email_outbox').insert({'booking_id':booking_id,'change_request_id':change_request_id,'recipient_email':recipient,'subject':subject,'template_key':template,'payload':payload}).execute()
+
+def dispatch_email_outbox(limit=10):
+    """Send queued notifications from the Streamlit runtime using the configured Gmail App Password."""
+    try:
+        password = str(st.secrets["gmail_password"]).strip()
+    except Exception:
+        return 0
+    if not password:
+        return 0
+    sender = "Kp.ponte.csv@gmail.com"
+    try:
+        pending = db().table("email_outbox").select("*").eq("status", "queued").order("created_at").limit(limit).execute().data or []
+    except Exception:
+        return 0
+    sent = 0
+    for item in pending:
+        message = EmailMessage()
+        message["From"] = sender
+        message["To"] = item["recipient_email"]
+        message["Subject"] = item["subject"]
+        payload = item.get("payload") or {}
+        details = []
+        for key, label in (("booking_reference", "Booking reference"), ("supplier", "Supplier"), ("product", "Product"), ("status", "Status"), ("scheduled_start", "Scheduled arrival"), ("proposed_start", "Proposed arrival"), ("reason", "Details")):
+            value = payload.get(key)
+            if value:
+                details.append(f"{label}: {value}")
+        message.set_content(
+            "KP Snacks Pontefract inbound delivery notification\\n\\n"
+            + ( "\\n".join(details) if details else "There is an update in the inbound delivery management system." )
+            + "\\n\\nThis is an automated notification. Please use the inbound delivery management app for the latest information."
+        )
+        try:
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=ssl.create_default_context())
+                smtp.ehlo()
+                smtp.login(sender, password)
+                smtp.send_message(message)
+            db().table("email_outbox").update({"status":"sent","sent_at":local_now().isoformat(),"attempt_count":int(item.get("attempt_count") or 0)+1,"last_error":None}).eq("id",item["id"]).eq("status","queued").execute()
+            sent += 1
+        except Exception as exc:
+            db().table("email_outbox").update({"status":"failed","attempt_count":int(item.get("attempt_count") or 0)+1,"last_error":str(exc)[:1000]}).eq("id",item["id"]).eq("status","queued").execute()
+    return sent
 
 def df(table, select="*"):
     return pd.DataFrame(rows(table,select))
@@ -824,7 +870,7 @@ def main():
         connected=True
     except Exception as e:
         connected=False; st.error(f"Inbound database connection failed ({type(e).__name__}). Check Streamlit Secrets.")
-    role=st.session_state.get("auth_role")
+    dispatch_email_outbox()\n    role=st.session_state.get("auth_role")
     with st.sidebar:
         st.markdown("## KP Snacks")
         st.markdown("#### NAVIGATION")
