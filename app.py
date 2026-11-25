@@ -64,6 +64,13 @@ def queue_email(supplier, subject, template, payload, booking_id=None):
     if address:
         db().table("email_outbox").insert({"booking_id":booking_id,"recipient_email":address,"subject":subject,"template_key":template,"payload":payload}).execute()
 
+def queue_internal_email(subject, template, payload, booking_id=None, change_request_id=None):
+    setting=one("app_settings",setting_key="internal_notification_email")
+    recipient=setting.get("setting_value") if setting else None
+    if isinstance(recipient,dict): recipient=recipient.get("email")
+    if recipient:
+        db().table("email_outbox").insert({"booking_id":booking_id,"change_request_id":change_request_id,"recipient_email":str(recipient),"subject":subject,"template_key":template,"payload":payload}).execute()
+
 def df(table, select="*"):
     return pd.DataFrame(rows(table,select))
 
@@ -299,6 +306,7 @@ def booking_management():
             if override and st.session_state.get("auth_role") not in ("administrator","warehouse_manager"): raise ValueError("Only an Administrator or Warehouse Manager can override capacity.")
             if override and not reason.strip(): raise ValueError("Enter a reason for the capacity override.")
             b=create_booking(supplier["id"],product["id"],datetime.combine(day,tm,TZ),duration,quantity,product.get("quantity_unit"),source="manual",status="confirmed",notes=note,override=override,override_reason=reason)
+            enqueue_status_email(b,"confirmed")
             st.success(f"Created {b['booking_reference']}"); st.rerun()
         except Exception as e: st.error(str(e))
 
@@ -483,6 +491,15 @@ def rules_page():
 
 def suppliers_page():
     st.subheader("Supplier management")
+    setting=one("app_settings",setting_key="internal_notification_email")
+    current_email=setting.get("setting_value") if setting else ""
+    if isinstance(current_email,dict): current_email=current_email.get("email","")
+    with st.form("internal_notification_email"):
+        site_email=st.text_input("Internal booking notification email",value=str(current_email or ""))
+        save_email=st.form_submit_button("Save notification address")
+    if save_email:
+        db().table("app_settings").upsert({"setting_key":"internal_notification_email","setting_value":site_email.strip(),"description":"Recipient for inbound supplier booking and change request notifications."},on_conflict="setting_key").execute()
+        st.success("Internal notification address saved."); st.rerun()
     with st.form("supplier_new"):
         code=st.text_input("Supplier code"); name=st.text_input("Supplier name"); email=st.text_input("Contact email"); phone=st.text_input("Phone")
         add=st.form_submit_button("Add supplier")
@@ -548,6 +565,7 @@ def supplier_portal():
                 else:
                     try:
                         b=create_booking(s["id"],product["id"],start,int(get_rule(product["id"])["standard_duration_minutes"]),qty,product.get("quantity_unit"),po["id"],"supplier_portal","requested",note)
+                        queue_internal_email("Inbound booking request awaiting approval","booking_request",{"booking_reference":b["booking_reference"],"supplier":s["name"],"product":product["name"],"scheduled_start":b["scheduled_start"]},booking_id=b["id"])
                         st.success(f"Request {b['booking_reference']} submitted. It is pending site approval.")
                     except Exception as e: st.error(str(e))
     with tabs[1]:
@@ -583,7 +601,8 @@ def supplier_portal():
                             proposed_start=datetime.combine(new_day,new_time,TZ).isoformat()
                             proposed_end=(datetime.fromisoformat(proposed_start)+timedelta(minutes=chosen["duration_minutes"])).isoformat()
                             proposed_duration=chosen["duration_minutes"]; reason_text=reason
-                        db().table("booking_change_requests").insert({"booking_id":chosen["id"],"status":"pending","proposed_start":proposed_start,"proposed_end":proposed_end,"proposed_duration_minutes":proposed_duration,"reason":reason_text}).execute()
+                        change=db().table("booking_change_requests").insert({"booking_id":chosen["id"],"status":"pending","proposed_start":proposed_start,"proposed_end":proposed_end,"proposed_duration_minutes":proposed_duration,"reason":reason_text}).execute().data
+                        queue_internal_email("Supplier booking change awaiting approval","booking_change_request",{"booking_reference":chosen["booking_reference"],"supplier":s["name"],"reason":reason_text,"proposed_start":proposed_start},booking_id=chosen["id"],change_request_id=change[0]["id"] if change else None)
                         st.success("Request sent to the site team. Your existing confirmed booking remains in place until approved.")
             else: st.caption("Only confirmed bookings more than 48 hours away can be amended or cancelled here.")
         else: st.info("No bookings yet.")
