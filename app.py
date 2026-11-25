@@ -271,13 +271,17 @@ def booking_management():
         with st.form("alternative"):
             d=st.date_input("Alternative date",value=local_now().date()+timedelta(days=7))
             t=st.time_input("Alternative start",value=time(8,0))
+            duration=st.number_input("Alternative unloading duration (minutes)",15,600,int(b["duration_minutes"]),step=5)
             reason=st.text_input("Message to supplier")
             go=st.form_submit_button("Send alternative proposal")
         if go:
             start=datetime.combine(d,t,TZ)
-            db().table("bookings").update({"status":"alternative_proposed","scheduled_start":start.isoformat(),"scheduled_end":(start+timedelta(minutes=b["duration_minutes"])).isoformat(),"internal_notes":reason,"updated_at":local_now().isoformat()}).eq("id",b["id"]).execute()
-            log_event(b["id"],"alternative_proposed",b["status"],"alternative_proposed",reason); enqueue_status_email(b,"alternative_proposed")
-            st.session_state.pop("alt_id"); st.rerun()
+            try:
+                updated=db().rpc("propose_inbound_alternative",{"p_booking_id":b["id"],"p_new_start":start.isoformat(),"p_duration_minutes":int(duration),"p_message":reason}).execute().data
+                updated=updated if isinstance(updated,dict) else (updated[0] if updated else b)
+                enqueue_status_email(updated,"alternative_proposed")
+                st.success("Alternative sent to supplier."); st.session_state.pop("alt_id"); st.rerun()
+            except Exception as e: st.error(f"Alternative could not be proposed: {e}")
     st.markdown("### Supplier amendments and cancellation requests")
     changes=[x for x in rows("booking_change_requests") if x.get("status") in ("pending","alternative_proposed")]
     for ch in changes:
@@ -592,6 +596,20 @@ def supplier_portal():
                 po=one("purchase_orders",id=b["purchase_order_id"]) if b.get("purchase_order_id") else None
                 out.append({"Reference":b["booking_reference"],"PO":po["po_number"] if po else "Manual","Product":p["name"] if p else "","Arrival":fmt(b["scheduled_start"]),"Status":b["status"].replace("_"," ").title()})
             st.dataframe(pd.DataFrame(out),use_container_width=True,hide_index=True)
+            for proposed in [x for x in mine if x.get("status")=="alternative_proposed"]:
+                with st.container(border=True):
+                    st.write(f"**Alternative proposed for {proposed['booking_reference']}** · {fmt(proposed['scheduled_start'])}")
+                    accept_col,decline_col=st.columns(2)
+                    if accept_col.button("Accept alternative",key=f"supplier_accept_{proposed['id']}"):
+                        db().table("bookings").update({"status":"confirmed","confirmed_at":local_now().isoformat(),"updated_at":local_now().isoformat()}).eq("id",proposed["id"]).eq("supplier_id",s["id"]).eq("status","alternative_proposed").execute()
+                        log_event(proposed["id"],"supplier_accepted_alternative","alternative_proposed","confirmed")
+                        queue_internal_email("Supplier accepted proposed delivery time","alternative_accepted",{"booking_reference":proposed["booking_reference"],"supplier":s["name"]},booking_id=proposed["id"])
+                        st.success("Alternative accepted; booking confirmed."); st.rerun()
+                    if decline_col.button("Decline alternative",key=f"supplier_decline_{proposed['id']}"):
+                        db().table("bookings").update({"status":"rejected","updated_at":local_now().isoformat()}).eq("id",proposed["id"]).eq("supplier_id",s["id"]).eq("status","alternative_proposed").execute()
+                        log_event(proposed["id"],"supplier_declined_alternative","alternative_proposed","rejected")
+                        queue_internal_email("Supplier declined proposed delivery time","alternative_declined",{"booking_reference":proposed["booking_reference"],"supplier":s["name"]},booking_id=proposed["id"])
+                        st.success("Alternative declined; request closed."); st.rerun()
             eligible=[]
             for b in mine:
                 try: future=datetime.fromisoformat(b["scheduled_start"].replace("Z","+00:00")).astimezone(TZ)>local_now()+timedelta(hours=48)
