@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import secrets
 import uuid
+from io import BytesIO
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -336,6 +337,11 @@ def booking_management():
 def orders_page():
     st.subheader("Orders & Excel upload")
     st.write("Upload an Excel workbook with supplier_code, po_number, product, delivery_type, quantity, due_date, latest_delivery_date and booking_permitted.")
+    template=pd.DataFrame(columns=["supplier_code","po_number","product","delivery_type","quantity","quantity_unit","due_date","latest_delivery_date","booking_permitted"])
+    buffer=BytesIO()
+    with pd.ExcelWriter(buffer,engine="openpyxl") as writer:
+        template.to_excel(writer,index=False,sheet_name="Purchase Orders")
+    st.download_button("Download Excel import template",buffer.getvalue(),"inbound-po-import-template.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     up=st.file_uploader("Purchase order workbook",type=["xlsx","xls"])
     if up:
         try:
