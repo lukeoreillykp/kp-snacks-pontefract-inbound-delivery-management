@@ -102,15 +102,12 @@ def create_booking(supplier_id, product_id, start, duration, quantity=None, unit
     area=area_for_rule(rule)
     if not area or not area.get("active"): raise ValueError("The delivery area is not active.")
     buffer=int(rule.get("buffer_minutes") if rule.get("buffer_minutes") is not None else area.get("buffer_minutes",20))
-    ok, message=capacity_check(area["id"],start,duration,buffer)
-    if not ok and not override: raise ValueError(message)
     end=start+timedelta(minutes=duration)
     reference="IN-"+datetime.now(TZ).strftime("%y%m%d")+"-"+secrets.token_hex(3).upper()
     payload={"booking_reference":reference,"supplier_id":supplier_id,"purchase_order_id":po_id,"product_id":product_id,"delivery_area_id":area["id"],"status":status,"source":source,"scheduled_start":start.isoformat(),"scheduled_end":end.isoformat(),"duration_minutes":int(duration),"buffer_minutes":buffer,"quantity":quantity,"quantity_unit":unit,"operators_required":int(rule.get("operators_required",1)),"capacity_override":bool(override),"capacity_override_reason":override_reason or None,"supplier_notes":notes or None}
-    result=db().table("bookings").insert(payload).execute().data
-    if not result: raise RuntimeError("Booking could not be saved.")
-    b=result[0]
-    log_event(b["id"],"booking_created",None,status,override_reason if override else None,{"source":source,"capacity_check":message})
+    result=db().rpc("create_inbound_booking",{"p_booking":payload}).execute().data
+    b=result if isinstance(result,dict) else (result[0] if result else None)
+    if not b: raise RuntimeError("Booking could not be saved.")
     return b
 
 def enqueue_status_email(booking, status):
@@ -306,7 +303,7 @@ def orders_page():
                         return v
                     payload={"supplier_id":sup["id"],"po_number":po,"product_id":prod["id"],"delivery_type":None if pd.isna(row.get("delivery_type")) else str(row.get("delivery_type")),"quantity":val("quantity"),"quantity_unit":prod.get("quantity_unit"),"due_date":val("due_date"),"latest_delivery_date":val("latest_delivery_date"),"booking_permitted":bool(row.get("booking_permitted",True)),"source_file_name":up.name,"status":"open"}
                     try:
-                        db().table("purchase_orders").upsert(payload,on_conflict="supplier_id,po_number").execute(); imported+=1
+                        db().table("purchase_orders").upsert(payload,on_conflict="supplier_id,po_number,product_id").execute(); imported+=1
                     except Exception as ex: issues.append(f"Row {idx+2}: {type(ex).__name__}")
                 st.success(f"Imported or updated {imported} purchase orders.")
                 if issues: st.warning("\\n".join(issues))
