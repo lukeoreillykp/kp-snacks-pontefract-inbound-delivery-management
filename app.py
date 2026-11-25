@@ -102,6 +102,31 @@ def team_captain_for_shift(shift_code, on_date):
         return None
     return None
 
+def booking_shift_code(booking):
+    """Resolve the shift from the configured shift hours for the booking start."""
+    try:
+        start=datetime.fromisoformat(str(booking["scheduled_start"]).replace("Z","+00:00"))
+        if start.tzinfo is not None:
+            start=start.astimezone(TZ)
+        weekday=start.isoweekday()
+        start_time=start.time().replace(tzinfo=None)
+        for hours in rows("shift_hours"):
+            if not hours.get("active") or int(hours.get("iso_weekday",0))!=weekday:
+                continue
+            shift=one("shift_definitions",id=hours.get("shift_id"))
+            if not shift:
+                continue
+            shift_start=time.fromisoformat(str(hours["start_time"]))
+            shift_end=time.fromisoformat(str(hours["end_time"]))
+            if hours.get("ends_next_day"):
+                if start_time>=shift_start or start_time<shift_end:
+                    return shift.get("shift_code")
+            elif shift_start<=start_time<shift_end:
+                return shift.get("shift_code")
+    except Exception:
+        return None
+    return None
+
 def fmt(dt):
     try: return datetime.fromisoformat(str(dt).replace("Z","+00:00")).astimezone(TZ).strftime("%d/%m/%Y %H:%M")
     except Exception: return str(dt)
@@ -492,8 +517,14 @@ def warehouse_page():
             st.caption(f"{captain['team']} Team · Team Captain: {captain['captain']}")
         with st.form(f"staff_{shift['shift_code']}"):
             st.markdown(f"**{shift['display_name']}**")
+            team_counts=one("app_settings",setting_key="team_headcounts")
+            team_counts=(team_counts or {}).get("setting_value") or {}
+            team_count=int(team_counts.get((captain or {}).get("team","").lower(),0) or 0)
             defaults={"days":4,"afternoons":3,"nights":4}
-            head=st.number_input("Main team headcount",0,30,int(existing["main_team_headcount"]) if existing else defaults[shift["shift_code"]])
+            planned_head=int(existing["main_team_headcount"]) if existing else (team_count or defaults[shift["shift_code"]])
+            head=st.number_input("Team headcount (including Team Captain)",0,30,planned_head)
+            if captain and captain.get("team"):
+                st.caption(f"{captain['team']} team · this total includes {captain['captain'] or 'the Team Captain'}. The headcount follows this team as its shift rotates.")
             holiday=st.number_input("People on holiday (maximum 1 per shift)",0,1,int(existing["people_on_holiday"]) if existing else 0)
             extra=st.checkbox("Additional operator available",bool(existing["additional_operator_available"]) if existing else False)
             bulk=st.checkbox("Dedicated bulk operator available",bool(existing["bulk_operator_available"]) if existing else (shift["shift_code"]=="days"),disabled=shift["shift_code"]!="days")
@@ -501,10 +532,13 @@ def warehouse_page():
             note=st.text_input("Notes",value=existing.get("notes","") if existing else "")
             save=st.form_submit_button("Save shift plan")
         if save:
+            if captain and captain.get("team"):
+                team_counts[(captain["team"].lower())]=int(head)
+                db().table("app_settings").upsert({"setting_key":"team_headcounts","setting_value":team_counts,"description":"Total operators per colour team, including the Team Captain."},on_conflict="setting_key").execute()
             payload={"plan_date":day.isoformat(),"shift_id":shift["id"],"main_team_headcount":head,"people_on_holiday":holiday,"additional_operator_available":extra,"additional_operator_count":1 if extra else 0,"bulk_operator_available":bulk,"protected_outbound_headcount":2,"notes":note}
             db().table("staffing_plans").upsert(payload,on_conflict="plan_date,shift_id").execute()
             st.success(f"{shift['display_name']} staffing saved."); st.rerun()
-    st.caption("Capacity planning protects two people for outbound/palletisation. The red/blue/yellow Team Captain rota is calculated automatically from the configured weekly anchor. Staffing headcounts and absences remain entered by date.")
+    st.caption("Capacity planning protects two people for outbound/palletisation. Colour-team headcounts include the Team Captain and follow the team through its weekly shift rotation. Set each team's total once; the same total carries to its next shift.")
     st.markdown("### Staff / absence register")
     with st.form("staff_add"):
         name=st.text_input("Staff display name")
@@ -550,8 +584,11 @@ def warehouse_page():
                     if str(x["starts_at"])<booking["scheduled_end"] and str(x["ends_at"])>booking["scheduled_start"]: conflicts.append(x)
                 absences=[x for x in rows("staff_shift_assignments") if x["staff_member_id"]==operator["id"] and x["assignment_type"] in ("holiday","absence") and str(x["starts_at"])<booking["scheduled_end"] and str(x["ends_at"])>booking["scheduled_start"]]
                 rule=get_rule(booking["product_id"])
+                booking_shift=booking_shift_code(booking)
+                allowed_shifts=operator.get("allowed_shift_codes") or []
                 if conflicts: st.error("This operator is already assigned to an overlapping delivery.")
                 elif absences: st.error("This operator has a holiday or absence recorded during this delivery.")
+                elif allowed_shifts and booking_shift and booking_shift not in allowed_shifts: st.error(f"{operator['display_name']} is not available for {booking_shift} shift.")
                 elif rule and rule.get("requires_dedicated_bulk_operator") and operator["staff_group"]!="dedicated_bulk": st.error("This product requires the dedicated bulk operator.")
                 else:
                     db().table("booking_operator_assignments").insert({"booking_id":booking["id"],"staff_member_id":operator["id"],"starts_at":booking["scheduled_start"],"ends_at":booking["scheduled_end"]}).execute()
