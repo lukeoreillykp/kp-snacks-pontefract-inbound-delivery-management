@@ -123,6 +123,14 @@ def booking_shift_code(booking):
                     return shift.get("shift_code")
             elif shift_start<=start_time<shift_end:
                 return shift.get("shift_code")
+        # Early hours after midnight belong to the previous day's overnight shift.
+        previous_weekday=7 if weekday==1 else weekday-1
+        for hours in rows("shift_hours"):
+            if not hours.get("active") or not hours.get("ends_next_day") or int(hours.get("iso_weekday",0))!=previous_weekday:
+                continue
+            shift=one("shift_definitions",id=hours.get("shift_id"))
+            if shift and start_time<time.fromisoformat(str(hours["end_time"])):
+                return shift.get("shift_code")
     except Exception:
         return None
     return None
