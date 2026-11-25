@@ -314,7 +314,6 @@ def main():
     except Exception as exc:
         st.error(f"The supplier portal cannot connect to the inbound booking service ({type(exc).__name__}). Please contact the Pontefract site team.")
         return
-    dispatch_email_outbox()
     supplier_id=st.session_state.get("supplier_id")
     supplier=one("suppliers",id=supplier_id) if supplier_id else None
     if supplier and not supplier.get("active"):
