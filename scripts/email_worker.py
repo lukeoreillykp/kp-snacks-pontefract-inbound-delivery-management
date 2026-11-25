@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 SENDER = "Kp.ponte.csv@gmail.com"
 TZ = ZoneInfo("Europe/London")
+MAX_ATTEMPTS = 3  # One initial attempt plus two retries.
 
 
 def request_json(url, key, method="GET", body=None):
@@ -51,9 +52,9 @@ def build_message(item):
         if value:
             details.append(f"{label}: {value}")
     message.set_content(
-        "KP Snacks Pontefract inbound delivery notification\n\n"
-        + ("\n".join(details) if details else "There is an update in the inbound delivery management system.")
-        + "\n\nThis is an automated notification. Please use the inbound delivery management app for the latest information."
+        "KP Snacks Pontefract inbound delivery notification\\n\\n"
+        + ("\\n".join(details) if details else "There is an update in the inbound delivery management system.")
+        + "\\n\\nThis is an automated notification. Please use the inbound delivery management app for the latest information."
     )
     return message
 
@@ -75,6 +76,7 @@ def main():
         return
 
     sent = 0
+    retrying = 0
     failed = 0
     for item in pending:
         attempt = int(item.get("attempt_count") or 0) + 1
@@ -95,20 +97,35 @@ def main():
             })
             sent += 1
         except Exception as exc:
-            failed += 1
             error = f"{type(exc).__name__}: {exc}"[:1000]
+            will_retry = attempt < MAX_ATTEMPTS
+            next_status = "queued" if will_retry else "failed"
             patch_url = f"{base}/rest/v1/email_outbox?id=eq.{urllib.parse.quote(str(item['id']))}&status=eq.queued"
             try:
                 request_json(patch_url, key, "PATCH", {
-                    "status": "failed",
+                    "status": next_status,
                     "attempt_count": attempt,
                     "last_error": error,
                 })
             except Exception as patch_exc:
                 print(f"Could not record failure for outbox item {item.get('id')}: {type(patch_exc).__name__}")
-            print(f"Email failed for outbox item {item.get('id')}: {error}")
+            if will_retry:
+                retrying += 1
+                print(
+                    f"Email attempt {attempt}/{MAX_ATTEMPTS} failed for outbox item "
+                    f"{item.get('id')}; it remains queued for the next worker run: {error}"
+                )
+            else:
+                failed += 1
+                print(
+                    f"Email permanently failed after {attempt} attempts for outbox item "
+                    f"{item.get('id')}: {error}"
+                )
 
-    print(f"Email queue checked: {sent} sent, {failed} failed.")
+    print(
+        f"Email queue checked: {sent} sent, {retrying} awaiting retry, "
+        f"{failed} permanently failed."
+    )
 
 
 if __name__ == "__main__":
