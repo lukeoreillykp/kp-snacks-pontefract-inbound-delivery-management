@@ -67,11 +67,15 @@ def queue_email(supplier, subject, template, payload, booking_id=None):
         db().table("email_outbox").insert({"booking_id":booking_id,"recipient_email":address,"subject":subject,"template_key":template,"payload":payload}).execute()
 
 def queue_internal_email(subject, template, payload, booking_id=None, change_request_id=None):
-    setting=one("app_settings",setting_key="internal_notification_email")
-    recipient=setting.get("setting_value") if setting else None
-    if isinstance(recipient,dict): recipient=recipient.get("email")
-    if recipient:
-        db().table("email_outbox").insert({"booking_id":booking_id,"change_request_id":change_request_id,"recipient_email":str(recipient),"subject":subject,"template_key":template,"payload":payload}).execute()
+    setting=one('app_settings',setting_key='internal_notification_emails')
+    raw=setting.get('setting_value') if setting else None
+    if not raw:
+        legacy=one('app_settings',setting_key='internal_notification_email')
+        raw=legacy.get('setting_value') if legacy else None
+    if isinstance(raw,dict): raw=raw.get('emails') or raw.get('email')
+    recipients=raw if isinstance(raw,list) else str(raw or '').replace(';',',').split(',')
+    for recipient in sorted({str(x).strip() for x in recipients if str(x).strip()}):
+        db().table('email_outbox').insert({'booking_id':booking_id,'change_request_id':change_request_id,'recipient_email':recipient,'subject':subject,'template_key':template,'payload':payload}).execute()
 
 def df(table, select="*"):
     return pd.DataFrame(rows(table,select))
