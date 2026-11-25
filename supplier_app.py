@@ -52,6 +52,14 @@ def log_supplier_event(booking_id,event,old_status,new_status,reason=None):
     db().table("booking_events").insert({"booking_id":booking_id,"event_type":event,"previous_status":old_status,"new_status":new_status,"actor_label":"supplier","reason":reason,"details":{}}).execute()
 
 def request_booking(supplier,po,product,start,quantity,note):
+    if start<now()+timedelta(days=7): raise ValueError("Bookings must be requested at least seven days in advance.")
+    if po.get("latest_delivery_date") and start.date()>date.fromisoformat(po["latest_delivery_date"]):
+        raise ValueError("The requested date is after the latest permitted delivery date on this purchase order.")
+    if po.get("quantity") is not None:
+        prior=rows_for_supplier("bookings",supplier["id"])
+        used=sum(float(x.get("quantity") or 0) for x in prior if x.get("purchase_order_id")==po["id"] and x.get("status") in ("requested","alternative_proposed","confirmed","completed"))
+        remaining=max(0.0,float(po["quantity"])-used)
+        if quantity>remaining: raise ValueError(f"Only {remaining:g} {po.get('quantity_unit') or ''} remain available on this purchase order.")
     rule=one("product_rules",product_id=product["id"])
     if not rule or not rule.get("active"): raise ValueError("This product is not currently bookable.")
     area=one("delivery_areas",id=rule["delivery_area_id"])
