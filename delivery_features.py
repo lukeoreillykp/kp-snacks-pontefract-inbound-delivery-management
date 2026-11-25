@@ -43,6 +43,8 @@ def arrival_page(db, role):
             db.table("booking_events").insert({"booking_id":selected["id"],"event_type":"arrival_confirmed","actor_label":role,"reason":None if correct=="Yes" else notes.strip(),"details":{"actual_arrival_at":stamp,"quantity_correct":correct=="Yes","quantity_received":None if correct=="Yes" else received}}).execute()
             st.success("Arrival confirmation saved.")
             st.rerun()
+    st.divider()
+    render_documents(db, selected, selected["supplier_id"], can_upload=False)
 
 def supplier_performance_page(db):
     st.subheader("Monthly supplier performance")
