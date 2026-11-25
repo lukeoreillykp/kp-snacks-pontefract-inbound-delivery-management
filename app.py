@@ -848,6 +848,15 @@ def reports_page():
     if events:
         st.markdown("### Booking event history")
         st.dataframe(pd.DataFrame(events).sort_values("created_at",ascending=False),use_container_width=True,hide_index=True)
+    dispatch_status=st.session_state.get("email_dispatch_status","")
+    st.markdown("### Gmail delivery diagnostics")
+    if dispatch_status:
+        if any(word in dispatch_status.lower() for word in ("unavailable","empty","could not","error")):
+            st.warning(dispatch_status)
+        else:
+            st.info(dispatch_status)
+    else:
+        st.info("No Gmail dispatcher status is available yet. Reload this page to run the dispatcher.")
     outbox=rows("email_outbox")
     st.markdown("### Supplier email notification queue")
     if outbox:
