@@ -81,19 +81,26 @@ def queue_internal_email(subject, template, payload, booking_id=None, change_req
         db().table('email_outbox').insert({'booking_id':booking_id,'change_request_id':change_request_id,'recipient_email':recipient,'subject':subject,'template_key':template,'payload':payload}).execute()
 
 def dispatch_email_outbox(limit=10):
-    """Send queued notifications from the Streamlit runtime using the configured Gmail App Password."""
+    """Send queued notifications and retain a safe, non-secret diagnostic for the UI."""
     try:
         password = str(st.secrets["gmail_password"]).strip()
-    except Exception:
+    except Exception as exc:
+        st.session_state["email_dispatch_status"] = f"Gmail secret unavailable ({type(exc).__name__}). Check the internal app's Streamlit Secrets for the key gmail_password."
         return 0
     if not password:
+        st.session_state["email_dispatch_status"] = "Gmail secret gmail_password is present but empty."
         return 0
     sender = "Kp.ponte.csv@gmail.com"
     try:
         pending = db().table("email_outbox").select("*").eq("status", "queued").order("created_at").limit(limit).execute().data or []
-    except Exception:
+    except Exception as exc:
+        st.session_state["email_dispatch_status"] = f"Could not read the email queue ({type(exc).__name__})."
+        return 0
+    if not pending:
+        st.session_state["email_dispatch_status"] = "Email sender is running; there are no queued messages."
         return 0
     sent = 0
+    failures = []
     for item in pending:
         message = EmailMessage()
         message["From"] = sender
@@ -120,7 +127,16 @@ def dispatch_email_outbox(limit=10):
             db().table("email_outbox").update({"status":"sent","sent_at":local_now().isoformat(),"attempt_count":int(item.get("attempt_count") or 0)+1,"last_error":None}).eq("id",item["id"]).eq("status","queued").execute()
             sent += 1
         except Exception as exc:
-            db().table("email_outbox").update({"status":"failed","attempt_count":int(item.get("attempt_count") or 0)+1,"last_error":str(exc)[:1000]}).eq("id",item["id"]).eq("status","queued").execute()
+            error_text = str(exc)[:1000]
+            failures.append(error_text)
+            try:
+                db().table("email_outbox").update({"status":"failed","attempt_count":int(item.get("attempt_count") or 0)+1,"last_error":error_text}).eq("id",item["id"]).eq("status","queued").execute()
+            except Exception as update_exc:
+                failures.append(f"Could not record failure ({type(update_exc).__name__}).")
+    if failures:
+        st.session_state["email_dispatch_status"] = f"Email sender attempted {len(pending)} message(s); {sent} sent and {len(failures)} error(s). First error: {failures[0]}"
+    else:
+        st.session_state["email_dispatch_status"] = f"Email sender ran successfully: {sent} message(s) sent."
     return sent
 
 def df(table, select="*"):
@@ -835,8 +851,8 @@ def reports_page():
     outbox=rows("email_outbox")
     st.markdown("### Supplier email notification queue")
     if outbox:
-        st.dataframe(pd.DataFrame([{"To":x["recipient_email"],"Subject":x["subject"],"Template":x["template_key"],"Status":x["status"],"Attempts":x["attempt_count"],"Created":fmt(x["created_at"])} for x in outbox]),use_container_width=True,hide_index=True)
-        st.caption("Messages are queued in Supabase. Delivery is not active until the inbound app's Gmail sending credentials / workflow are connected.")
+        st.dataframe(pd.DataFrame([{"To":x["recipient_email"],"Subject":x["subject"],"Template":x["template_key"],"Status":x["status"],"Attempts":x["attempt_count"],"Last error":x.get("last_error") or "","Created":fmt(x["created_at"])} for x in outbox]),use_container_width=True,hide_index=True)
+        st.caption("The app attempts Gmail delivery when the internal app loads. Check Status, Attempts and Last error above if a message remains queued or fails.")
     else: st.info("No supplier notification emails have been queued yet.")
 
 def main():
@@ -871,6 +887,11 @@ def main():
     except Exception as e:
         connected=False; st.error(f"Inbound database connection failed ({type(e).__name__}). Check Streamlit Secrets.")
     dispatch_email_outbox()
+    dispatch_status = st.session_state.get("email_dispatch_status", "")
+    if dispatch_status and ("unavailable" in dispatch_status.lower() or "empty" in dispatch_status.lower() or "could not" in dispatch_status.lower() or "error" in dispatch_status.lower()):
+        st.warning(dispatch_status)
+    elif dispatch_status:
+        st.caption(dispatch_status)
     role=st.session_state.get("auth_role")
     with st.sidebar:
         st.markdown("## KP Snacks")
