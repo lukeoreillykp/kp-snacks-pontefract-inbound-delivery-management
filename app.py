@@ -1,10 +1,7 @@
 import hashlib
 import hmac
 import secrets
-import smtplib
-import ssl
 import uuid
-from email.message import EmailMessage
 from io import BytesIO
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -79,65 +76,6 @@ def queue_internal_email(subject, template, payload, booking_id=None, change_req
     recipients=raw if isinstance(raw,list) else str(raw or '').replace(';',',').split(',')
     for recipient in sorted({str(x).strip() for x in recipients if str(x).strip()}):
         db().table('email_outbox').insert({'booking_id':booking_id,'change_request_id':change_request_id,'recipient_email':recipient,'subject':subject,'template_key':template,'payload':payload}).execute()
-
-def dispatch_email_outbox(limit=10):
-    """Send queued notifications and retain a safe, non-secret diagnostic for the UI."""
-    try:
-        password = str(st.secrets["gmail_password"]).strip()
-    except Exception as exc:
-        st.session_state["email_dispatch_status"] = f"Gmail secret unavailable ({type(exc).__name__}). Check the internal app's Streamlit Secrets for the key gmail_password."
-        return 0
-    if not password:
-        st.session_state["email_dispatch_status"] = "Gmail secret gmail_password is present but empty."
-        return 0
-    sender = "Kp.ponte.csv@gmail.com"
-    try:
-        pending = db().table("email_outbox").select("*").eq("status", "queued").order("created_at").limit(limit).execute().data or []
-    except Exception as exc:
-        st.session_state["email_dispatch_status"] = f"Could not read the email queue ({type(exc).__name__})."
-        return 0
-    if not pending:
-        st.session_state["email_dispatch_status"] = "Email sender is running; there are no queued messages."
-        return 0
-    sent = 0
-    failures = []
-    for item in pending:
-        message = EmailMessage()
-        message["From"] = sender
-        message["To"] = item["recipient_email"]
-        message["Subject"] = item["subject"]
-        payload = item.get("payload") or {}
-        details = []
-        for key, label in (("booking_reference", "Booking reference"), ("supplier", "Supplier"), ("product", "Product"), ("status", "Status"), ("scheduled_start", "Scheduled arrival"), ("proposed_start", "Proposed arrival"), ("reason", "Details")):
-            value = payload.get(key)
-            if value:
-                details.append(f"{label}: {value}")
-        message.set_content(
-            "KP Snacks Pontefract inbound delivery notification\n\n"
-            + ( "\n".join(details) if details else "There is an update in the inbound delivery management system." )
-            + "\n\nThis is an automated notification. Please use the inbound delivery management app for the latest information."
-        )
-        try:
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as smtp:
-                smtp.ehlo()
-                smtp.starttls(context=ssl.create_default_context())
-                smtp.ehlo()
-                smtp.login(sender, password)
-                smtp.send_message(message)
-            db().table("email_outbox").update({"status":"sent","sent_at":local_now().isoformat(),"attempt_count":int(item.get("attempt_count") or 0)+1,"last_error":None}).eq("id",item["id"]).eq("status","queued").execute()
-            sent += 1
-        except Exception as exc:
-            error_text = str(exc)[:1000]
-            failures.append(error_text)
-            try:
-                db().table("email_outbox").update({"status":"failed","attempt_count":int(item.get("attempt_count") or 0)+1,"last_error":error_text}).eq("id",item["id"]).eq("status","queued").execute()
-            except Exception as update_exc:
-                failures.append(f"Could not record failure ({type(update_exc).__name__}).")
-    if failures:
-        st.session_state["email_dispatch_status"] = f"Email sender attempted {len(pending)} message(s); {sent} sent and {len(failures)} error(s). First error: {failures[0]}"
-    else:
-        st.session_state["email_dispatch_status"] = f"Email sender ran successfully: {sent} message(s) sent."
-    return sent
 
 def df(table, select="*"):
     return pd.DataFrame(rows(table,select))
@@ -848,9 +786,8 @@ def reports_page():
     if events:
         st.markdown("### Booking event history")
         st.dataframe(pd.DataFrame(events).sort_values("created_at",ascending=False),use_container_width=True,hide_index=True)
-    dispatch_status=str(st.session_state.get("email_dispatch_status","") or "").strip()
-    st.markdown("### Gmail delivery diagnostics")
-    diagnostic_text = dispatch_status or "No Gmail dispatcher status is available yet. Reload this page to run the dispatcher."
+    st.markdown("### Background email worker")
+    st.info("GitHub Actions checks the Supabase email queue approximately every five minutes. Failed sends are retried on later runs up to two additional times. A status of Sent means Gmail accepted the message for sending; it does not confirm delivery to the recipient's inbox.")
     st.markdown(
         f'<div style="background:#ffffff;color:#111827;border:1px solid #9ca3af;'
         f'border-left:5px solid #2563eb;border-radius:6px;padding:12px 14px;'
@@ -861,7 +798,7 @@ def reports_page():
     st.markdown("### Supplier email notification queue")
     if outbox:
         st.dataframe(pd.DataFrame([{"To":x["recipient_email"],"Subject":x["subject"],"Template":x["template_key"],"Status":x["status"],"Attempts":x["attempt_count"],"Last error":x.get("last_error") or "","Created":fmt(x["created_at"])} for x in outbox]),use_container_width=True,hide_index=True)
-        st.caption("The app attempts Gmail delivery when the internal app loads. Check Status, Attempts and Last error above if a message remains queued or fails.")
+        st.caption("The GitHub Actions worker processes queued messages independently of this app. Failed messages remain queued for up to two retries; after three unsuccessful attempts they are marked failed.")
     else: st.info("No supplier notification emails have been queued yet.")
 
 def main():
@@ -895,7 +832,6 @@ def main():
         connected=True
     except Exception as e:
         connected=False; st.error(f"Inbound database connection failed ({type(e).__name__}). Check Streamlit Secrets.")
-    st.session_state["email_dispatch_status"] = "Background email worker is configured to check the queue independently of the Streamlit apps every five minutes. The GitHub Actions secrets must be added before scheduled sending can begin."
     role=st.session_state.get("auth_role")
     with st.sidebar:
         st.markdown("## KP Snacks")
@@ -910,16 +846,8 @@ def main():
         page=st.radio("Navigation",choices)
     if not connected: return
     if page=="Dashboard":
-        st.markdown("### Temporary Gmail delivery status")
-        home_mail_status=str(st.session_state.get("email_dispatch_status","") or "").strip()
-        st.markdown(
-            f'<div style="background:#ffffff;color:#111827;border:1px solid #9ca3af;'
-            f'border-left:5px solid #2563eb;border-radius:6px;padding:12px 14px;'
-            f'font-size:15px;font-weight:600;line-height:1.5;">'
-            f'{home_mail_status or "No Gmail dispatcher status is available yet."}</div>',
-            unsafe_allow_html=True
-        )
-        st.caption("Temporary diagnostic panel — no admin sign-in needed. Remove this panel once email delivery is confirmed.")
+        st.markdown("### Email notifications")
+        st.caption("Background delivery is handled by GitHub Actions, independently of this Streamlit app. Check Reports for the email queue and any recorded failures.")
         dashboard(public=not bool(role))
     elif page=="Delivery calendar": calendar_page(public=not bool(role))
     elif not role:
