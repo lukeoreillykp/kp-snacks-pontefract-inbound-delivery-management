@@ -895,12 +895,7 @@ def main():
         connected=True
     except Exception as e:
         connected=False; st.error(f"Inbound database connection failed ({type(e).__name__}). Check Streamlit Secrets.")
-    dispatch_email_outbox()
-    dispatch_status = st.session_state.get("email_dispatch_status", "")
-    if dispatch_status and ("unavailable" in dispatch_status.lower() or "empty" in dispatch_status.lower() or "could not" in dispatch_status.lower() or "error" in dispatch_status.lower()):
-        st.warning(dispatch_status)
-    elif dispatch_status:
-        st.caption(dispatch_status)
+    st.session_state["email_dispatch_status"] = "Background email worker is configured to check the queue independently of the Streamlit apps every five minutes. The GitHub Actions secrets must be added before scheduled sending can begin."
     role=st.session_state.get("auth_role")
     with st.sidebar:
         st.markdown("## KP Snacks")
