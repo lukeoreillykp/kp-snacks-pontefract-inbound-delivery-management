@@ -914,7 +914,18 @@ def main():
         else: choices=["Dashboard","Delivery calendar"]
         page=st.radio("Navigation",choices)
     if not connected: return
-    if page=="Dashboard": dashboard(public=not bool(role))
+    if page=="Dashboard":
+        st.markdown("### Temporary Gmail delivery status")
+        home_mail_status=str(st.session_state.get("email_dispatch_status","") or "").strip()
+        st.markdown(
+            f'<div style="background:#ffffff;color:#111827;border:1px solid #9ca3af;'
+            f'border-left:5px solid #2563eb;border-radius:6px;padding:12px 14px;'
+            f'font-size:15px;font-weight:600;line-height:1.5;">'
+            f'{home_mail_status or "No Gmail dispatcher status is available yet."}</div>',
+            unsafe_allow_html=True
+        )
+        st.caption("Temporary diagnostic panel — no admin sign-in needed. Remove this panel once email delivery is confirmed.")
+        dashboard(public=not bool(role))
     elif page=="Delivery calendar": calendar_page(public=not bool(role))
     elif not role:
         st.info("Sign in below for internal operational access.")
