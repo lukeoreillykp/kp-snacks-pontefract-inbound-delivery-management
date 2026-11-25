@@ -604,15 +604,16 @@ def suppliers_page():
             st.write(f"Contact: {s.get('contact_email') or 'Not set'} · Portal: {'Enabled' if s.get('shared_login_enabled') else 'Disabled'}")
             with st.form(f"supplier_{s['id']}"):
                 email=st.text_input("Contact email",s.get("contact_email") or "")
-                enabled=st.checkbox("Supplier portal enabled",bool(s.get("shared_login_enabled")))
+                active=st.checkbox("Supplier active",bool(s.get("active")))
+                enabled=st.checkbox("Supplier portal login enabled",bool(s.get("shared_login_enabled")))
                 password=st.text_input("Set / reset supplier password (12+ characters)",type="password")
                 save=st.form_submit_button("Save supplier")
             if save:
-                patch={"contact_email":email.strip() or None,"shared_login_enabled":enabled}
+                patch={"contact_email":email.strip() or None,"active":active,"shared_login_enabled":enabled and active,"updated_at":local_now().isoformat()}
                 if password:
                     if len(password)<12: st.error("Password must be at least 12 characters."); continue
                     patch["supplier_password_hash"]=pw_hash(password); patch["supplier_password_changed_at"]=local_now().isoformat()
-                db().table("suppliers").update(patch).eq("id",s["id"]).execute(); st.success("Supplier saved."); st.rerun()
+                db().table("suppliers").update(patch).eq("id",s["id"]).execute(); st.success("Supplier saved. Historical POs and bookings are retained."); st.rerun()
 
 def supplier_portal():
     st.subheader("Supplier portal")
