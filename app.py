@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+from delivery_features import arrival_page, supplier_performance_page, render_documents
 from supabase import Client, create_client
 
 st.set_page_config(page_title="KP Snacks | Pontefract Inbound", page_icon="📦", layout="wide")
@@ -15,11 +16,11 @@ TZ = ZoneInfo("Europe/London")
 KP_RED = "#C8102E"
 ROLES = ["supervisor", "material_controller", "warehouse_manager", "administrator"]
 ROLE_LABELS = {"supervisor":"Team Captain","material_controller":"Material Controller","warehouse_manager":"Warehouse Manager","administrator":"Administrator"}
-PAGES = ["Dashboard","Delivery calendar","Booking management","Orders & Excel upload","Warehouse resources","Products & delivery rules","Suppliers","Reports","User & role management"]
+PAGES = ["Dashboard","Delivery calendar","Booking management","Delivery arrivals","Orders & Excel upload","Warehouse resources","Products & delivery rules","Suppliers","Reports","User & role management"]
 ROLE_PAGES = {
-    "supervisor": set(PAGES[:3]),
-    "material_controller": set(PAGES[:3] + ["Orders & Excel upload","Products & delivery rules"]),
-    "warehouse_manager": set(PAGES[:3] + ["Warehouse resources"]),
+    "supervisor": set(PAGES[:4]),
+    "material_controller": set(PAGES[:4] + ["Orders & Excel upload","Products & delivery rules","Reports"]),
+    "warehouse_manager": set(PAGES[:4] + ["Warehouse resources","Reports"]),
     "administrator": set(PAGES),
 }
 ACTIVE_BOOKING = ["requested","alternative_proposed","confirmed"]
@@ -725,11 +726,15 @@ def main():
         if credential("administrator"): sign_in()
         else: bootstrap()
     elif page=="Booking management": booking_management()
+    elif page=="Delivery arrivals": arrival_page(db(), role)
     elif page=="Orders & Excel upload": orders_page()
     elif page=="Warehouse resources": warehouse_page()
     elif page=="Products & delivery rules": rules_page()
     elif page=="Suppliers": suppliers_page()
-    elif page=="Reports": reports_page()
+    elif page=="Reports":
+        reports_page()
+        st.divider()
+        supplier_performance_page(db())
     elif page=="User & role management":
         if role!="administrator": st.error("Administrator access required.")
         else: save_role_access()
