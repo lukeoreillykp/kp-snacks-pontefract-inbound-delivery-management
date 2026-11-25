@@ -94,11 +94,15 @@ def capacity_check(area_id, start, duration, buffer, ignore_id=None):
             if overlap(start,end,bstart,bend):
                 return False, f"Area conflict with booking {b.get('booking_reference','')}, {fmt(bstart)}–{fmt(bend)}."
         except Exception: continue
-    return True, "Area is available. Staffing must still be checked by the shift manager."
+    return True, "Area is available. Area and staffing are checked again transactionally when saved."
 
 def create_booking(supplier_id, product_id, start, duration, quantity=None, unit=None, po_id=None, source="manual", status="requested", notes="", override=False, override_reason=""):
     rule=get_rule(product_id)
-    if not rule: raise ValueError("This product has no active delivery rule.")
+    if not rule or not rule.get("active"): raise ValueError("This product has no active delivery rule.")
+    product=one("products",id=product_id)
+    if not product or not product.get("active"): raise ValueError("This product is inactive.")
+    if quantity is not None and product.get("max_quantity") is not None and float(quantity)>float(product["max_quantity"]):
+        raise ValueError(f"Maximum quantity for this product is {product['max_quantity']} {product.get('quantity_unit') or ''}.")
     area=area_for_rule(rule)
     if not area or not area.get("active"): raise ValueError("The delivery area is not active.")
     buffer=int(rule.get("buffer_minutes") if rule.get("buffer_minutes") is not None else area.get("buffer_minutes",20))
@@ -382,8 +386,12 @@ def warehouse_page():
         if save:
             if end<start: st.error("End date must be on or after start date.")
             else:
-                db().table("staff_shift_assignments").insert({"staff_member_id":selected["id"],"shift_id":selected_shift["id"],"starts_at":datetime.combine(start,time(0),TZ).isoformat(),"ends_at":datetime.combine(end+timedelta(days=1),time(0),TZ).isoformat(),"assignment_type":typ,"notes":note}).execute()
-                st.success("Absence record saved."); st.rerun()
+                existing_holidays=[x for x in rows("staff_shift_assignments") if x.get("assignment_type")=="holiday" and x.get("shift_id")==selected_shift["id"] and x.get("staff_member_id")!=selected["id"] and str(x["starts_at"])[:10]<=(end+timedelta(days=1)).isoformat() and str(x["ends_at"])[:10]>start.isoformat()]
+                if typ=="holiday" and existing_holidays:
+                    st.error("Only one person can be on holiday from this shift at a time.")
+                else:
+                    db().table("staff_shift_assignments").insert({"staff_member_id":selected["id"],"shift_id":selected_shift["id"],"starts_at":datetime.combine(start,time(0),TZ).isoformat(),"ends_at":datetime.combine(end+timedelta(days=1),time(0),TZ).isoformat(),"assignment_type":typ,"notes":note}).execute()
+                    st.success("Absence record saved."); st.rerun()
 
 def rules_page():
     st.subheader("Products & delivery rules")
@@ -405,7 +413,7 @@ def rules_page():
             else:
                 inserted=db().table("products").insert({"name":new_name.strip(),"category":category,"delivery_method":method,"quantity_unit":unit.strip() or None,"active":True}).execute().data
                 if inserted:
-                    db().table("product_rules").insert({"product_id":inserted[0]["id"],"delivery_area_id":area["id"],"standard_duration_minutes":duration,"min_duration_minutes":min_duration,"max_duration_minutes":max_duration,"duration_mode":"manager_adjustable" if min_duration!=max_duration else "fixed","operators_required":1,"buffer_minutes":20,"active":True}).execute()
+                    db().table("product_rules").insert({"product_id":inserted[0]["id"],"delivery_area_id":area["id"],"standard_duration_minutes":duration,"min_duration_minutes":min_duration,"max_duration_minutes":max_duration,"duration_mode":"manager_adjustable" if min_duration!=max_duration else "fixed","operators_required":1,"buffer_minutes":None,"active":True}).execute()
                     st.success("Product added to catalogue and delivery rules."); st.rerun()
     for p in products:
         rule=get_rule(p["id"])
@@ -417,14 +425,13 @@ def rules_page():
                 minimum=st.number_input("Minimum duration",15,600,int(rule["min_duration_minutes"]),step=5)
                 maximum=st.number_input("Maximum duration",15,600,int(rule["max_duration_minutes"]),step=5)
                 area=st.selectbox("Delivery area",areas,index=next((i for i,a in enumerate(areas) if a["id"]==rule["delivery_area_id"]),0),format_func=lambda x:x["name"])
-                buffer=st.number_input("Buffer (minutes)",0,180,int(rule["buffer_minutes"] if rule["buffer_minutes"] is not None else 20),step=5)
                 operators=st.number_input("Operators required",1,10,int(rule["operators_required"]))
                 save=st.form_submit_button("Save product rule")
             if save:
                 if minimum>maximum: st.error("Minimum duration cannot exceed maximum.")
                 else:
                     db().table("products").update({"active":active,"updated_at":local_now().isoformat()}).eq("id",p["id"]).execute()
-                    db().table("product_rules").update({"standard_duration_minutes":duration,"min_duration_minutes":minimum,"max_duration_minutes":maximum,"duration_mode":"manager_adjustable" if minimum!=maximum else "fixed","delivery_area_id":area["id"],"buffer_minutes":buffer,"operators_required":operators,"updated_at":local_now().isoformat()}).eq("id",rule["id"]).execute()
+                    db().table("product_rules").update({"standard_duration_minutes":duration,"min_duration_minutes":minimum,"max_duration_minutes":maximum,"duration_mode":"manager_adjustable" if minimum!=maximum else "fixed","delivery_area_id":area["id"],"buffer_minutes":None,"operators_required":operators,"updated_at":local_now().isoformat()}).eq("id",rule["id"]).execute()
                     st.success("Rule saved."); st.rerun()
     st.markdown("### Delivery area buffers")
     for a in areas:
