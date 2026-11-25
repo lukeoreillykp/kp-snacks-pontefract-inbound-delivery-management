@@ -1,5 +1,8 @@
 import hashlib
 import hmac
+import smtplib
+import ssl
+from email.message import EmailMessage
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -51,6 +54,42 @@ def queue_internal(subject,template,payload,booking_id=None,change_request_id=No
     if isinstance(address,dict): address=address.get("email")
     if address:
         db().table("email_outbox").insert({"booking_id":booking_id,"change_request_id":change_request_id,"recipient_email":str(address),"subject":subject,"template_key":template,"payload":payload}).execute()
+
+def dispatch_email_outbox(limit=10):
+    """Deliver queued notifications using the Gmail App Password in Streamlit secrets."""
+    try:
+        password=str(st.secrets["gmail_password"]).strip()
+    except Exception:
+        return 0
+    if not password:
+        return 0
+    sender="Kp.ponte.csv@gmail.com"
+    try:
+        pending=db().table("email_outbox").select("*").eq("status","queued").order("created_at").limit(limit).execute().data or []
+    except Exception:
+        return 0
+    sent=0
+    for item in pending:
+        message=EmailMessage()
+        message["From"]=sender
+        message["To"]=item["recipient_email"]
+        message["Subject"]=item["subject"]
+        payload=item.get("payload") or {}
+        labels=(("booking_reference","Booking reference"),("supplier","Supplier"),("product","Product"),("status","Status"),("scheduled_start","Scheduled arrival"),("proposed_start","Proposed arrival"),("reason","Details"))
+        details=[f"{label}: {payload[key]}" for key,label in labels if payload.get(key)]
+        message.set_content("KP Snacks Pontefract inbound delivery notification\n\n"+("\n".join(details) if details else "There is an update in the inbound delivery management system.")+"\n\nThis is an automated notification. Please use the inbound delivery management app for the latest information.")
+        try:
+            with smtplib.SMTP("smtp.gmail.com",587,timeout=20) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=ssl.create_default_context())
+                smtp.ehlo()
+                smtp.login(sender,password)
+                smtp.send_message(message)
+            db().table("email_outbox").update({"status":"sent","sent_at":now().isoformat(),"attempt_count":int(item.get("attempt_count") or 0)+1,"last_error":None}).eq("id",item["id"]).eq("status","queued").execute()
+            sent+=1
+        except Exception as exc:
+            db().table("email_outbox").update({"status":"failed","attempt_count":int(item.get("attempt_count") or 0)+1,"last_error":str(exc)[:1000]}).eq("id",item["id"]).eq("status","queued").execute()
+    return sent
 
 def log_supplier_event(booking_id,event,old_status,new_status,reason=None):
     db().table("booking_events").insert({"booking_id":booking_id,"event_type":event,"previous_status":old_status,"new_status":new_status,"actor_label":"supplier","reason":reason,"details":{}}).execute()
@@ -275,7 +314,7 @@ def main():
     except Exception as exc:
         st.error(f"The supplier portal cannot connect to the inbound booking service ({type(exc).__name__}). Please contact the Pontefract site team.")
         return
-    supplier_id=st.session_state.get("supplier_id")
+    dispatch_email_outbox()\n    supplier_id=st.session_state.get("supplier_id")
     supplier=one("suppliers",id=supplier_id) if supplier_id else None
     if supplier and not supplier.get("active"):
         st.session_state.pop("supplier_id",None)
