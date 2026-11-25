@@ -83,23 +83,43 @@ def df(table, select="*"):
 def local_now():
     return datetime.now(TZ)
 
+def team_shift_for_date(team_colour, on_date):
+    config=one("app_settings",setting_key="team_captain_rota")
+    config=(config or {}).get("setting_value") or {}
+    if not isinstance(config,dict) or not config.get("anchor_week_start"):
+        return None
+    try:
+        details=(config.get("teams") or {}).get(str(team_colour).lower())
+        if not details: return None
+        weeks=(on_date-date.fromisoformat(config["anchor_week_start"])).days//7
+        current=details.get("shift")
+        rotation=config.get("rotation") or {"days":"nights","nights":"afternoons","afternoons":"days"}
+        for _ in range(weeks % 3): current=rotation.get(current,current)
+        return current
+    except Exception:
+        return None
+
+def individual_shift_for_date(staff_name, on_date):
+    if str(staff_name).strip().lower() != "carl everitt": return None
+    config=one("app_settings",setting_key="individual_staff_rotas")
+    config=(config or {}).get("setting_value") or {}
+    details=(config.get("carl everitt") or {})
+    try:
+        weeks=(on_date-date.fromisoformat(details["anchor_week_start"])).days//7
+        current=details.get("shift")
+        rotation=details.get("rotation") or {"days":"afternoons","afternoons":"days"}
+        for _ in range(weeks % 2): current=rotation.get(current,current)
+        return current
+    except Exception:
+        return None
+
 def team_captain_for_shift(shift_code, on_date):
     config=one("app_settings",setting_key="team_captain_rota")
     config=(config or {}).get("setting_value") or {}
-    if not isinstance(config,dict) or not config.get("anchor_week_start") or not config.get("teams"):
-        return None
-    try:
-        anchor=date.fromisoformat(config["anchor_week_start"])
-        weeks=(on_date-anchor).days//7
-        rotation=config.get("rotation") or {"days":"nights","nights":"afternoons","afternoons":"days"}
-        for team,details in config["teams"].items():
-            current=details.get("shift")
-            for _ in range(weeks % 3):
-                current=rotation.get(current,current)
-            if current==shift_code:
-                return {"team":team.title(),"captain":details.get("captain")}
-    except Exception:
-        return None
+    if not isinstance(config,dict) or not config.get("teams"): return None
+    for team,details in config["teams"].items():
+        if team_shift_for_date(team,on_date)==shift_code:
+            return {"team":team.title(),"captain":details.get("captain")}
     return None
 
 def booking_shift_code(booking):
@@ -552,12 +572,26 @@ def warehouse_page():
     st.markdown("### Staff / absence register")
     with st.form("staff_add"):
         name=st.text_input("Staff display name")
-        group=st.selectbox("Team",["main_team","additional_operator","dedicated_bulk"])
+        group=st.selectbox("Staff group",["main_team","additional_operator","dedicated_bulk"])
+        team_colour=st.selectbox("Colour team",["yellow","red","blue","Not assigned"],disabled=group!="main_team")
         add=st.form_submit_button("Add staff member")
     if add and name.strip():
-        db().table("staff_members").insert({"display_name":name.strip(),"staff_group":group,"active":True}).execute(); st.success("Staff member added."); st.rerun()
+        db().table("staff_members").insert({"display_name":name.strip(),"staff_group":group,"active":True,"team_colour":team_colour if group=="main_team" and team_colour!="Not assigned" else None}).execute(); st.success("Staff member added."); st.rerun()
     staff=rows("staff_members")
-    if staff: st.dataframe(pd.DataFrame([{"Name":x["display_name"],"Group":x["staff_group"],"Active":x["active"]} for x in staff]),use_container_width=True,hide_index=True)
+    if staff:
+        for person in staff:
+            with st.expander(f"{person['display_name']} · {person.get('team_colour') or person['staff_group']}"):
+                with st.form("staff_edit_"+person["id"]):
+                    new_group=st.selectbox("Staff group",["main_team","additional_operator","dedicated_bulk"],index=["main_team","additional_operator","dedicated_bulk"].index(person.get("staff_group") or "main_team"))
+                    colours=["yellow","red","blue","Not assigned"]
+                    current_colour=person.get("team_colour") if person.get("team_colour") in colours else "Not assigned"
+                    new_colour=st.selectbox("Colour team",colours,index=colours.index(current_colour),disabled=new_group!="main_team")
+                    active=st.checkbox("Active",bool(person.get("active")))
+                    save_person=st.form_submit_button("Save staff details")
+                if save_person:
+                    db().table("staff_members").update({"staff_group":new_group,"team_colour":new_colour if new_group=="main_team" and new_colour!="Not assigned" else None,"active":active}).eq("id",person["id"]).execute()
+                    st.success("Staff details saved."); st.rerun()
+        st.caption("Carl Everitt follows his own weekly Days/Afternoons rota. Colour-team members follow their team's three-shift weekly rotation.")
     if staff:
         selected=st.selectbox("Record holiday / sickness / training for",staff,format_func=lambda x:x["display_name"])
         selected_shift=st.selectbox("Shift",shifts,format_func=lambda x:x["display_name"])
@@ -595,9 +629,17 @@ def warehouse_page():
                 absences=[x for x in rows("staff_shift_assignments") if x["staff_member_id"]==operator["id"] and x["assignment_type"] in ("holiday","absence") and str(x["starts_at"])<booking["scheduled_end"] and str(x["ends_at"])>booking["scheduled_start"]]
                 rule=get_rule(booking["product_id"])
                 booking_shift=booking_shift_code(booking)
+                booking_start=datetime.fromisoformat(str(booking["scheduled_start"]).replace("Z","+00:00")).astimezone(TZ)
+                booking_date=booking_start.date()
                 allowed_shifts=operator.get("allowed_shift_codes") or []
+                team_colour=operator.get("team_colour")
+                individual_shift=individual_shift_for_date(operator["display_name"],booking_date)
+                team_shift=team_shift_for_date(team_colour,booking_date) if team_colour else None
                 if conflicts: st.error("This operator is already assigned to an overlapping delivery.")
                 elif absences: st.error("This operator has a holiday or absence recorded during this delivery.")
+                elif individual_shift and booking_shift!=individual_shift: st.error(f"{operator['display_name']} is on {individual_shift.title()} for this week, not {booking_shift or 'the selected'} shift.")
+                elif team_colour and team_shift and booking_shift!=team_shift: st.error(f"{operator['display_name']} is in the {team_colour.title()} team, which is on {team_shift.title()} for this week.")
+                elif operator["staff_group"]=="main_team" and not team_colour and not individual_shift and not allowed_shifts: st.error("Assign this main-team operator to a colour team before allocating deliveries.")
                 elif allowed_shifts and booking_shift and booking_shift not in allowed_shifts: st.error(f"{operator['display_name']} is not available for {booking_shift} shift.")
                 elif rule and rule.get("requires_dedicated_bulk_operator") and operator["staff_group"]!="dedicated_bulk": st.error("This product requires the dedicated bulk operator.")
                 else:
