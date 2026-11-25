@@ -210,7 +210,18 @@ def portal(supplier):
 
 def main():
     st.markdown(f"""<style>
-    .stApp{{background:#f5f5f5}}
+    .stApp,[data-testid="stAppViewContainer"]{{background:#f3f4f6;color:#1f2937}}
+    [data-testid="stMain"],[data-testid="stMarkdownContainer"],
+    [data-testid="stMarkdownContainer"] p,[data-testid="stMarkdownContainer"] li,
+    [data-testid="stText"],label,[data-testid="stCaptionContainer"]{{color:#1f2937}}
+    [data-testid="stVerticalBlockBorderWrapper"],[data-testid="stExpander"],
+    [data-testid="stForm"],[data-testid="stMetric"]{{background:#fff!important;color:#1f2937!important;border:1px solid #d1d5db!important;border-radius:.65rem}}
+    [data-testid="stVerticalBlockBorderWrapper"]{{padding:.35rem}}
+    [data-testid="stExpander"] details,[data-testid="stExpander"] summary,
+    [data-testid="stExpander"] summary p{{color:#1f2937!important}}
+    [data-baseweb="input"],[data-baseweb="select"],[data-baseweb="textarea"],
+    [data-testid="stDateInput"] input,[data-testid="stTimeInput"] input{{background:#fff!important;color:#111827!important}}
+    [data-testid="stDataFrame"]{{border:1px solid #d1d5db;border-radius:.5rem}}
     .supplier-header{{background:{KP_RED};color:white;padding:1.2rem 1.5rem;border-radius:.5rem;margin-bottom:1.2rem}}
     .supplier-header h1{{color:white;margin:0;font-size:1.8rem}}
     .supplier-header p{{color:white;margin:.35rem 0 0}}
