@@ -468,6 +468,7 @@ def supplier_portal():
         if go:
             s=one("suppliers",supplier_code=code.strip())
             if s and s.get("active") and s.get("shared_login_enabled") and s.get("supplier_password_hash") and pw_ok(password,s["supplier_password_hash"]):
+                st.session_state.pop("auth_role",None)
                 st.session_state["supplier_id"]=s["id"]; st.rerun()
             else: st.error("Supplier sign-in failed. Contact the Pontefract site team.")
         return
@@ -475,7 +476,8 @@ def supplier_portal():
     if not s or not s.get("active") or not s.get("shared_login_enabled"):
         st.session_state.pop("supplier_id",None); st.error("Supplier access is no longer enabled."); st.rerun()
     st.write(f"Signed in as **{s['name']}**")
-    if st.button("Supplier sign out"): st.session_state.pop("supplier_id",None); st.rerun()
+    if st.button("Supplier sign out"):
+        st.session_state.pop("supplier_id",None); st.session_state.pop("auth_role",None); st.rerun()
     tabs=st.tabs(["Book a delivery","My bookings","Purchase orders"])
     with tabs[0]:
         orders=[x for x in rows("purchase_orders") if x["supplier_id"]==s["id"] and x.get("booking_permitted") and x.get("status")=="open"]
@@ -555,6 +557,12 @@ def reports_page():
     if events:
         st.markdown("### Booking event history")
         st.dataframe(pd.DataFrame(events).sort_values("created_at",ascending=False),use_container_width=True,hide_index=True)
+    outbox=rows("email_outbox")
+    st.markdown("### Supplier email notification queue")
+    if outbox:
+        st.dataframe(pd.DataFrame([{"To":x["recipient_email"],"Subject":x["subject"],"Template":x["template_key"],"Status":x["status"],"Attempts":x["attempt_count"],"Created":fmt(x["created_at"])} for x in outbox]),use_container_width=True,hide_index=True)
+        st.caption("Messages are queued in Supabase. Delivery is not active until the inbound app's Gmail sending credentials / workflow are connected.")
+    else: st.info("No supplier notification emails have been queued yet.")
 
 def main():
     st.markdown(f"""<style>
@@ -576,7 +584,8 @@ def main():
         st.success("Database connected") if connected else st.error("Database disconnected")
         if role:
             st.write(f"Signed in: **{ROLE_LABELS.get(role,role)}**")
-            if st.button("Sign out",use_container_width=True): st.session_state.pop("auth_role",None); st.rerun()
+            if st.button("Sign out",use_container_width=True):
+                st.session_state.pop("auth_role",None); st.session_state.pop("supplier_id",None); st.rerun()
             choices=[x for x in PAGES if x in ROLE_PAGES.get(role,set())]
         else: choices=["Dashboard","Delivery calendar","Supplier portal"]
         page=st.radio("Navigation",choices)
