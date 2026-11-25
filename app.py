@@ -439,6 +439,20 @@ def orders_page():
         if st.button("Discard preview"):
             st.session_state.pop("po_import_preview",None)
             st.rerun()
+    st.markdown("### Quantity discrepancies awaiting Material Controller review")
+    for issue in [x for x in rows("po_import_issues") if x.get("issue_type")=="quantity_below_committed" and not x.get("resolved_at")]:
+        details=issue.get("details") or {}
+        supplier=one("suppliers",id=issue.get("supplier_id"))
+        st.warning(str(supplier.get("name") if supplier else "Supplier")+" · PO "+str(issue.get("po_number"))+" · existing "+str(details.get("existing_quantity"))+" · uploaded "+str(details.get("new_quantity"))+" · committed "+str(details.get("committed_quantity")))
+        choice=st.radio("Decision for PO "+str(issue.get("po_number")),["Keep existing quantity","Investigate further"],key="po_decision_"+issue["id"],horizontal=True)
+        note=st.text_input("Decision note",key="po_note_"+issue["id"])
+        if st.button("Record Material Controller decision",key="po_resolve_"+issue["id"]):
+            if not note.strip(): st.error("Enter a decision note.")
+            else:
+                resolution="kept_existing_quantity" if choice=="Keep existing quantity" else "investigation_required"
+                patch={"resolution":resolution,"resolution_reason":note.strip(),"resolved_by_role":st.session_state.get("auth_role"),"resolved_at":local_now().isoformat() if choice=="Keep existing quantity" else None}
+                db().table("po_import_issues").update(patch).eq("id",issue["id"]).execute()
+                st.success("Decision recorded."); st.rerun()
     st.markdown("### Current purchase orders")
     orders=rows("purchase_orders")
     out=[]
