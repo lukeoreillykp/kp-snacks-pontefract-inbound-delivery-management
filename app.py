@@ -360,9 +360,10 @@ def warehouse_page():
             st.markdown(f"**{shift['display_name']}**")
             defaults={"days":4,"afternoons":3,"nights":4}
             head=st.number_input("Main team headcount",0,30,int(existing["main_team_headcount"]) if existing else defaults[shift["shift_code"]])
-            holiday=st.number_input("People on holiday / absent",0,30,int(existing["people_on_holiday"]) if existing else 0)
+            holiday=st.number_input("People on holiday (maximum 1 per shift)",0,1,int(existing["people_on_holiday"]) if existing else 0)
             extra=st.checkbox("Additional operator available",bool(existing["additional_operator_available"]) if existing else False)
-            bulk=st.checkbox("Dedicated bulk operator available",bool(existing["bulk_operator_available"]) if existing else (shift["shift_code"]=="days"))
+            bulk=st.checkbox("Dedicated bulk operator available",bool(existing["bulk_operator_available"]) if existing else (shift["shift_code"]=="days"),disabled=shift["shift_code"]!="days")
+            if shift["shift_code"]!="days": bulk=False
             note=st.text_input("Notes",value=existing.get("notes","") if existing else "")
             save=st.form_submit_button("Save shift plan")
         if save:
@@ -381,6 +382,7 @@ def warehouse_page():
     if staff: st.dataframe(pd.DataFrame([{"Name":x["display_name"],"Group":x["staff_group"],"Active":x["active"]} for x in staff]),use_container_width=True,hide_index=True)
     if staff:
         selected=st.selectbox("Record holiday / sickness / training for",staff,format_func=lambda x:x["display_name"])
+        selected_shift=st.selectbox("Shift",shifts,format_func=lambda x:x["display_name"])
         with st.form("absence"):
             typ=st.selectbox("Assignment type",["holiday","absence","training","other"])
             start=st.date_input("From",value=day); end=st.date_input("To",value=day)
@@ -396,6 +398,25 @@ def warehouse_page():
 def rules_page():
     st.subheader("Products & delivery rules")
     products=rows("products"); areas=rows("delivery_areas")
+    with st.expander("Add a new product to the catalogue"):
+        with st.form("new_product"):
+            new_name=st.text_input("Product name")
+            category=st.selectbox("Category",["ingredient","packaging","sundries"])
+            method=st.selectbox("Delivery method",["tanker","one_tonne_totes","ibc","palletised"])
+            unit=st.text_input("Quantity unit",value="pallets")
+            area=st.selectbox("Delivery area",areas,format_func=lambda x:x["name"])
+            duration=st.number_input("Standard duration (minutes)",15,600,45,step=5)
+            min_duration=st.number_input("Minimum duration",15,600,45,step=5)
+            max_duration=st.number_input("Maximum duration",15,600,70,step=5)
+            create=st.form_submit_button("Add product")
+        if create:
+            if not new_name.strip(): st.error("Enter a product name.")
+            elif min_duration>max_duration: st.error("Minimum duration cannot exceed maximum.")
+            else:
+                inserted=db().table("products").insert({"name":new_name.strip(),"category":category,"delivery_method":method,"quantity_unit":unit.strip() or None,"active":True}).execute().data
+                if inserted:
+                    db().table("product_rules").insert({"product_id":inserted[0]["id"],"delivery_area_id":area["id"],"standard_duration_minutes":duration,"min_duration_minutes":min_duration,"max_duration_minutes":max_duration,"duration_mode":"manager_adjustable" if min_duration!=max_duration else "fixed","operators_required":1,"buffer_minutes":20,"active":True}).execute()
+                    st.success("Product added to catalogue and delivery rules."); st.rerun()
     for p in products:
         rule=get_rule(p["id"])
         if not rule: continue
