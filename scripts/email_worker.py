@@ -59,8 +59,8 @@ def build_message(item):
 
 
 def main():
-    base = os.environ["SUPABASE_URL"].rstrip("/")
-    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    base = os.environ["SUPABASE_URL"].strip().rstrip("/")
+    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"].strip()
     password = os.environ["GMAIL_APP_PASSWORD"].strip()
     query = urllib.parse.urlencode({
         "select": "*",
