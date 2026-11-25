@@ -870,7 +870,8 @@ def main():
         connected=True
     except Exception as e:
         connected=False; st.error(f"Inbound database connection failed ({type(e).__name__}). Check Streamlit Secrets.")
-    dispatch_email_outbox()\n    role=st.session_state.get("auth_role")
+    dispatch_email_outbox()
+    role=st.session_state.get("auth_role")
     with st.sidebar:
         st.markdown("## KP Snacks")
         st.markdown("#### NAVIGATION")
