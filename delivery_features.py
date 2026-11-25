@@ -27,8 +27,10 @@ def arrival_page(db, role):
     product = products.get(selected["product_id"], {})
     st.write(f'**Supplier:** {supplier.get("name","")}  ·  **Product:** {product.get("name","")}  ·  **Expected quantity:** {selected.get("quantity") or "Not recorded"} {selected.get("quantity_unit") or ""}')
     existing = selected.get("actual_arrival_at")
+    default_arrival = datetime.fromisoformat(existing.replace("Z","+00:00")).astimezone(TZ) if existing else datetime.now(TZ)
     with st.form("arrival_confirmation"):
-        arrived = st.datetime_input("Actual arrival date and time", value=datetime.fromisoformat(existing.replace("Z","+00:00")).astimezone(TZ).replace(tzinfo=None) if existing else datetime.now(TZ).replace(tzinfo=None))
+        arrival_day = st.date_input("Actual arrival date", value=default_arrival.date())
+        arrival_time = st.time_input("Actual arrival time", value=default_arrival.time().replace(tzinfo=None))
         correct = st.radio("Were the quantities correct?", ["Yes", "No"], horizontal=True, index=0 if selected.get("quantity_correct") is not False else 1)
         received = st.number_input("Quantity received (only if incorrect)", min_value=0.0, value=float(selected.get("quantity_received") or 0), disabled=correct=="Yes")
         notes = st.text_area("Discrepancy details (only if incorrect)", value=selected.get("quantity_discrepancy_notes") or "", disabled=correct=="Yes")
@@ -37,7 +39,7 @@ def arrival_page(db, role):
         if correct == "No" and not notes.strip():
             st.error("Please describe the quantity discrepancy.")
         else:
-            stamp = arrived.replace(tzinfo=TZ).isoformat()
+            stamp = datetime.combine(arrival_day, arrival_time, TZ).isoformat()
             patch = {"actual_arrival_at": stamp, "quantity_correct": correct=="Yes", "quantity_received": None if correct=="Yes" else received, "quantity_discrepancy_notes": None if correct=="Yes" else notes.strip(), "updated_at": datetime.now(TZ).isoformat()}
             db.table("bookings").update(patch).eq("id", selected["id"]).execute()
             db.table("booking_events").insert({"booking_id":selected["id"],"event_type":"arrival_confirmed","actor_label":role,"reason":None if correct=="Yes" else notes.strip(),"details":{"actual_arrival_at":stamp,"quantity_correct":correct=="Yes","quantity_received":None if correct=="Yes" else received}}).execute()
