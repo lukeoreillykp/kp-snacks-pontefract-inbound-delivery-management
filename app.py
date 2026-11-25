@@ -521,8 +521,10 @@ def warehouse_page():
             team_counts=(team_counts or {}).get("setting_value") or {}
             team_count=int(team_counts.get((captain or {}).get("team","").lower(),0) or 0)
             defaults={"days":4,"afternoons":3,"nights":4}
-            planned_head=int(existing["main_team_headcount"]) if existing else (team_count or defaults[shift["shift_code"]])
+            planned_head=team_count if team_count>0 else (int(existing["main_team_headcount"]) if existing else 0)
             head=st.number_input("Team headcount (including Team Captain)",0,30,planned_head)
+            if captain and team_count==0:
+                st.warning(f"Set the {captain['team']} team's total headcount here. It will then follow that team through the rota.")
             if captain and captain.get("team"):
                 st.caption(f"{captain['team']} team · this total includes {captain['captain'] or 'the Team Captain'}. The headcount follows this team as its shift rotates.")
             holiday=st.number_input("People on holiday (maximum 1 per shift)",0,1,int(existing["people_on_holiday"]) if existing else 0)
