@@ -148,6 +148,7 @@ def sign_in():
     if go:
         rec=credential(role)
         if rec and rec.get("enabled") and rec.get("password_hash") and pw_ok(password,rec["password_hash"]):
+            st.session_state.pop("supplier_id",None)
             st.session_state["auth_role"]=role; st.rerun()
         else: st.error("Sign-in failed. Check the password or contact the Administrator.")
 
