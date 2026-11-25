@@ -251,6 +251,7 @@ def booking_management():
                 try:
                     updated=db().rpc("approve_inbound_booking",{"p_booking_id":b["id"],"p_duration_minutes":int(adjusted_duration)}).execute().data
                     updated=updated if isinstance(updated,dict) else (updated[0] if updated else b)
+                    log_event(updated["id"],"booking_approved_by_role","requested","confirmed",None,{"role":st.session_state.get("auth_role"),"duration_minutes":int(adjusted_duration)})
                     enqueue_status_email(updated,"confirmed"); st.success("Booking confirmed."); st.rerun()
                 except Exception as e: st.error(f"Booking could not be approved: {e}")
             if c2.button("Reject",key=f"reject_{b['id']}"):
@@ -279,6 +280,7 @@ def booking_management():
             try:
                 updated=db().rpc("propose_inbound_alternative",{"p_booking_id":b["id"],"p_new_start":start.isoformat(),"p_duration_minutes":int(duration),"p_message":reason}).execute().data
                 updated=updated if isinstance(updated,dict) else (updated[0] if updated else b)
+                log_event(updated["id"],"alternative_proposed_by_role",b["status"],"alternative_proposed",reason,{"role":st.session_state.get("auth_role"),"duration_minutes":int(duration)})
                 enqueue_status_email(updated,"alternative_proposed")
                 st.success("Alternative sent to supplier."); st.session_state.pop("alt_id"); st.rerun()
             except Exception as e: st.error(f"Alternative could not be proposed: {e}")
@@ -297,6 +299,7 @@ def booking_management():
                 try:
                     updated=db().rpc("approve_inbound_change",{"p_change_id":ch["id"]}).execute().data
                     updated=updated if isinstance(updated,dict) else (updated[0] if updated else b)
+                    log_event(updated["id"],"supplier_change_approved_by_role",updated["status"],updated["status"],None,{"role":st.session_state.get("auth_role")})
                     enqueue_status_email(updated,updated["status"])
                     st.success("Change request approved."); st.rerun()
                 except Exception as e:
@@ -325,6 +328,7 @@ def booking_management():
             if override and st.session_state.get("auth_role") not in ("administrator","warehouse_manager"): raise ValueError("Only an Administrator or Warehouse Manager can override capacity.")
             if override and not reason.strip(): raise ValueError("Enter a reason for the capacity override.")
             b=create_booking(supplier["id"],product["id"],datetime.combine(day,tm,TZ),duration,quantity,product.get("quantity_unit"),source="manual",status="confirmed",notes=note,override=override,override_reason=reason)
+            log_event(b["id"],"manual_booking_created_by_role",None,"confirmed",reason if override else None,{"role":st.session_state.get("auth_role"),"duration_minutes":duration})
             enqueue_status_email(b,"confirmed")
             st.success(f"Created {b['booking_reference']}"); st.rerun()
         except Exception as e: st.error(str(e))
