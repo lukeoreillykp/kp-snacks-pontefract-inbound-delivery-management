@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+from delivery_features import render_documents
 from supabase import Client, create_client
 
 st.set_page_config(page_title="KP Snacks | Supplier Inbound Portal",page_icon="📦",layout="wide")
@@ -144,6 +145,12 @@ def portal(supplier):
                 po=one("purchase_orders",id=booking["purchase_order_id"]) if booking.get("purchase_order_id") else None
                 output.append({"Reference":booking["booking_reference"],"Purchase order":po["po_number"] if po else "Manual","Product":product["name"] if product else "","Arrival":fmt(booking["scheduled_start"]),"Status":booking["status"].replace("_"," ").title()})
             st.dataframe(pd.DataFrame(output),use_container_width=True,hide_index=True)
+            csv_frame=pd.DataFrame(output)
+            st.download_button("Download my bookings (CSV)",csv_frame.to_csv(index=False).encode("utf-8"),"my-inbound-bookings.csv","text/csv")
+            st.markdown("### Delivery paperwork")
+            for booking in mine:
+                with st.expander(f'{booking["booking_reference"]} · {fmt(booking["scheduled_start"])}'):
+                    render_documents(db(),booking,supplier["id"],can_upload=True)
             for proposed in [x for x in mine if x.get("status")=="alternative_proposed"]:
                 with st.container(border=True):
                     st.write(f"**Alternative proposed for {proposed['booking_reference']}**")
