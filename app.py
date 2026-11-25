@@ -301,9 +301,14 @@ elif page == "User & role management":
     st.subheader("User & role management")
     st.info("Administrator access: manage shared role passwords and enable or disable role access.")
 
-if not auth_role:
+if not auth_role and db_ok:
     st.divider()
-    if not is_admin_configured():
+    try:
+        admin_ready = is_admin_configured()
+    except Exception:
+        admin_ready = False
+        st.error("Administrator access could not be checked. Verify the database connection.")
+    if not admin_ready:
         bootstrap_admin()
     else:
         login_panel()
