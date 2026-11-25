@@ -641,6 +641,35 @@ def suppliers_page():
                     if len(password)<12: st.error("Password must be at least 12 characters."); continue
                     patch["supplier_password_hash"]=pw_hash(password); patch["supplier_password_changed_at"]=local_now().isoformat()
                 db().table("suppliers").update(patch).eq("id",s["id"]).execute(); st.success("Supplier saved. Historical POs and bookings are retained."); st.rerun()
+            st.markdown("**Optional named supplier contacts**")
+            contacts=db().table("supplier_contacts").select("*").eq("supplier_id",s["id"]).execute().data or []
+            for contact in contacts:
+                st.write(str(contact.get("full_name"))+" · "+str(contact.get("email"))+" · "+("Active" if contact.get("active") else "Disabled"))
+            with st.form("supplier_contact_add_"+s["id"]):
+                contact_name=st.text_input("Contact name",key="contact_name_"+s["id"])
+                contact_email=st.text_input("Contact email",key="contact_email_"+s["id"])
+                contact_password=st.text_input("Initial contact password (12+ characters)",type="password",key="contact_password_"+s["id"])
+                add_contact=st.form_submit_button("Add named contact")
+            if add_contact:
+                if not contact_name.strip() or "@" not in contact_email or len(contact_password)<12: st.error("Enter a name, valid email and password of at least 12 characters.")
+                else:
+                    try:
+                        db().table("supplier_contacts").insert({"supplier_id":s["id"],"full_name":contact_name.strip(),"email":contact_email.strip(),"password_hash":pw_hash(contact_password),"active":True}).execute()
+                        st.success("Named contact added. The supplier shared login remains available."); st.rerun()
+                    except Exception as exc: st.error("Could not add contact. Check whether this email is already in use.")
+            if contacts:
+                contact_options={x["full_name"]+" · "+x["email"]:x for x in contacts}
+                selected_contact=st.selectbox("Manage named contact",list(contact_options),key="manage_contact_"+s["id"])
+                chosen=contact_options[selected_contact]
+                c1,c2=st.columns(2)
+                if c1.button("Disable contact" if chosen.get("active") else "Reactivate contact",key="toggle_contact_"+chosen["id"]):
+                    db().table("supplier_contacts").update({"active":not chosen.get("active"),"updated_at":local_now().isoformat()}).eq("id",chosen["id"]).execute(); st.success("Contact status updated."); st.rerun()
+                with st.form("contact_reset_"+chosen["id"]):
+                    reset_password=st.text_input("New contact password (12+ characters)",type="password")
+                    reset=st.form_submit_button("Reset contact password")
+                if reset:
+                    if len(reset_password)<12: st.error("Password must be at least 12 characters.")
+                    else: db().table("supplier_contacts").update({"password_hash":pw_hash(reset_password),"password_changed_at":local_now().isoformat(),"updated_at":local_now().isoformat()}).eq("id",chosen["id"]).execute(); st.success("Contact password reset."); st.rerun()
 
 def supplier_portal():
     st.subheader("Supplier portal")
