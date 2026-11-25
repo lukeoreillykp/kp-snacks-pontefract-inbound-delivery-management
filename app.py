@@ -14,7 +14,7 @@ st.set_page_config(page_title="KP Snacks | Pontefract Inbound", page_icon="📦"
 TZ = ZoneInfo("Europe/London")
 KP_RED = "#C8102E"
 ROLES = ["supervisor", "material_controller", "warehouse_manager", "administrator"]
-ROLE_LABELS = {"supervisor":"Supervisor","material_controller":"Material Controller","warehouse_manager":"Warehouse Manager","administrator":"Administrator"}
+ROLE_LABELS = {"supervisor":"Team Captain","material_controller":"Material Controller","warehouse_manager":"Warehouse Manager","administrator":"Administrator"}
 PAGES = ["Dashboard","Delivery calendar","Booking management","Orders & Excel upload","Warehouse resources","Products & delivery rules","Suppliers","Reports","User & role management"]
 ROLE_PAGES = {
     "supervisor": set(PAGES[:3]),
@@ -676,8 +676,26 @@ def reports_page():
 
 def main():
     st.markdown(f"""<style>
-    .stApp{{background:#f5f5f5}} [data-testid="stSidebar"]{{background:#292929}}
+    /* Consistent high-contrast page and card styling */
+    .stApp,[data-testid="stAppViewContainer"]{{background:#f3f4f6;color:#1f2937}}
+    [data-testid="stMain"]{{color:#1f2937}}
+    [data-testid="stMarkdownContainer"],[data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] li,[data-testid="stText"],label,
+    [data-testid="stCaptionContainer"]{{color:#1f2937}}
+    [data-testid="stVerticalBlockBorderWrapper"],[data-testid="stExpander"],
+    [data-testid="stForm"],[data-testid="stMetric"]{{background:#fff!important;color:#1f2937!important;border:1px solid #d1d5db!important;border-radius:.65rem}}
+    [data-testid="stVerticalBlockBorderWrapper"]{{padding:.35rem}}
+    [data-testid="stExpander"] details,[data-testid="stExpander"] summary,
+    [data-testid="stExpander"] summary p{{color:#1f2937!important}}
+    [data-testid="stMetric"] label,[data-testid="stMetricValue"],[data-testid="stMetricDelta"]{{color:#111827!important}}
+    [data-baseweb="input"],[data-baseweb="select"],[data-baseweb="textarea"],
+    [data-testid="stDateInput"] input,[data-testid="stTimeInput"] input{{background:#fff!important;color:#111827!important}}
+    [data-testid="stDataFrame"]{{border:1px solid #d1d5db;border-radius:.5rem}}
+    [data-testid="stSidebar"]{{background:#252525}}
     [data-testid="stSidebar"] *{{color:#fff!important}}
+    [data-testid="stSidebar"] pre,[data-testid="stSidebar"] code,
+    [data-testid="stSidebar"] [data-testid="stCode"]{{display:none!important}}
+    [data-testid="stSidebar"] [data-testid="stRadio"] label{{color:#fff!important}}
     .kp-header{{background:{KP_RED};color:#fff;padding:1.2rem 1.5rem;border-radius:.5rem;margin-bottom:1.2rem}}
     .kp-header h1{{color:#fff;margin:0;font-size:1.8rem}} .kp-header p{{color:#fff;margin:.35rem 0 0}}
     </style>""",unsafe_allow_html=True)
@@ -690,10 +708,10 @@ def main():
     role=st.session_state.get("auth_role")
     with st.sidebar:
         st.markdown("## KP Snacks")
-        st.caption("Pontefract site · Inbound")
-        st.success("Database connected") if connected else st.error("Database disconnected")
+        st.markdown("#### NAVIGATION")
+        st.caption("● Database connected" if connected else "● Database disconnected")
         if role:
-            st.write(f"Signed in: **{ROLE_LABELS.get(role,role)}**")
+            st.markdown(f"#### {ROLE_LABELS.get(role,role)} ACCESS")
             if st.button("Sign out",use_container_width=True):
                 st.session_state.pop("auth_role",None); st.session_state.pop("supplier_id",None); st.rerun()
             choices=[x for x in PAGES if x in ROLE_PAGES.get(role,set())]
