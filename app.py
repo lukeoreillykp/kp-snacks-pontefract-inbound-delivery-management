@@ -445,9 +445,9 @@ def rules_page():
             if not new_name.strip(): st.error("Enter a product name.")
             elif min_duration>max_duration: st.error("Minimum duration cannot exceed maximum.")
             else:
-                inserted=db().table("products").insert({"name":new_name.strip(),"category":category,"delivery_method":method,"quantity_unit":unit.strip() or None,"active":True}).execute().data
+                inserted=db().table("products").insert({"name":new_name.strip(),"category":category,"delivery_method":method,"quantity_unit":unit.strip() or None,"max_quantity":max_quantity if max_quantity>0 else None,"active":True}).execute().data
                 if inserted:
-                    db().table("product_rules").insert({"product_id":inserted[0]["id"],"delivery_area_id":area["id"],"standard_duration_minutes":duration,"min_duration_minutes":min_duration,"max_duration_minutes":max_duration,"duration_mode":"manager_adjustable" if min_duration!=max_duration else "fixed","operators_required":1,"buffer_minutes":None,"active":True}).execute()
+                    db().table("product_rules").insert({"product_id":inserted[0]["id"],"delivery_area_id":area["id"],"standard_duration_minutes":duration,"min_duration_minutes":min_duration,"max_duration_minutes":max_duration,"duration_mode":"manager_adjustable" if min_duration!=max_duration else "fixed","operators_required":1,"buffer_minutes":None,"permitted_shifts":permitted,"requires_dedicated_bulk_operator":dedicated,"active":True}).execute()
                     st.success("Product added to catalogue and delivery rules."); st.rerun()
     for p in products:
         rule=get_rule(p["id"])
@@ -455,17 +455,23 @@ def rules_page():
         with st.expander(p["name"]):
             with st.form(f"rule_{p['id']}"):
                 active=st.checkbox("Product active",p["active"])
+                category=st.selectbox("Category",["ingredient","packaging","sundries"],index=["ingredient","packaging","sundries"].index(p["category"]))
+                method=st.selectbox("Delivery method",["tanker","one_tonne_totes","ibc","palletised"],index=["tanker","one_tonne_totes","ibc","palletised"].index(p["delivery_method"]))
+                unit=st.text_input("Quantity unit",value=p.get("quantity_unit") or "")
+                max_quantity=st.number_input("Maximum quantity (0 = no limit)",0.0,1000.0,float(p["max_quantity"]) if p.get("max_quantity") is not None else 0.0)
                 duration=st.number_input("Standard duration (minutes)",15,600,int(rule["standard_duration_minutes"]),step=5)
                 minimum=st.number_input("Minimum duration",15,600,int(rule["min_duration_minutes"]),step=5)
                 maximum=st.number_input("Maximum duration",15,600,int(rule["max_duration_minutes"]),step=5)
                 area=st.selectbox("Delivery area",areas,index=next((i for i,a in enumerate(areas) if a["id"]==rule["delivery_area_id"]),0),format_func=lambda x:x["name"])
                 operators=st.number_input("Operators required",1,10,int(rule["operators_required"]))
+                permitted=st.multiselect("Permitted shifts",["days","afternoons","nights"],default=rule.get("permitted_shifts") or ["days","afternoons","nights"])
+                dedicated=st.checkbox("Requires dedicated bulk inbound operator",bool(rule.get("requires_dedicated_bulk_operator")))
                 save=st.form_submit_button("Save product rule")
             if save:
                 if minimum>maximum: st.error("Minimum duration cannot exceed maximum.")
                 else:
-                    db().table("products").update({"active":active,"updated_at":local_now().isoformat()}).eq("id",p["id"]).execute()
-                    db().table("product_rules").update({"standard_duration_minutes":duration,"min_duration_minutes":minimum,"max_duration_minutes":maximum,"duration_mode":"manager_adjustable" if minimum!=maximum else "fixed","delivery_area_id":area["id"],"buffer_minutes":None,"operators_required":operators,"updated_at":local_now().isoformat()}).eq("id",rule["id"]).execute()
+                    db().table("products").update({"active":active,"category":category,"delivery_method":method,"quantity_unit":unit.strip() or None,"max_quantity":max_quantity if max_quantity>0 else None,"updated_at":local_now().isoformat()}).eq("id",p["id"]).execute()
+                    db().table("product_rules").update({"standard_duration_minutes":duration,"min_duration_minutes":minimum,"max_duration_minutes":maximum,"duration_mode":"manager_adjustable" if minimum!=maximum else "fixed","delivery_area_id":area["id"],"buffer_minutes":None,"operators_required":operators,"permitted_shifts":permitted,"requires_dedicated_bulk_operator":dedicated,"updated_at":local_now().isoformat()}).eq("id",rule["id"]).execute()
                     st.success("Rule saved."); st.rerun()
     st.markdown("### Delivery area buffers")
     for a in areas:
