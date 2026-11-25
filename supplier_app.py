@@ -173,15 +173,17 @@ def portal(supplier):
                 with st.form("supplier_change_request"):
                     selected=st.selectbox("Confirmed booking",eligible,format_func=lambda x:f"{x['booking_reference']} · {fmt(x['scheduled_start'])}")
                     action=st.radio("Request type",["Change arrival time","Cancel booking"])
-                    new_day=st.date_input("New date",value=now().date()+timedelta(days=7),min_value=now().date()+timedelta(days=7))
+                    new_day=st.date_input("New date",value=now().date()+timedelta(days=1),min_value=now().date())
                     new_time=st.time_input("New arrival time",value=time(8,0))
                     reason=st.text_input("Reason for request")
                     submit=st.form_submit_button("Submit request")
                 if submit:
                     if not reason.strip():
                         st.error("Enter a reason for the request.")
-                    elif action=="Change arrival time" and datetime.combine(new_day,new_time,TZ)<now()+timedelta(days=7):
-                        st.error("Amended bookings must still be at least seven days ahead.")
+                    elif action=="Change arrival time" and datetime.combine(new_day,new_time,TZ)<=now():
+                        st.error("Choose a future date and time for the amended booking.")
+                    elif action=="Change arrival time" and selected.get("purchase_order_id") and (one("purchase_orders",id=selected["purchase_order_id"]) or {}).get("latest_delivery_date") and new_day>date.fromisoformat(one("purchase_orders",id=selected["purchase_order_id"])["latest_delivery_date"]):
+                        st.error("The amended date is after the latest permitted delivery date on this purchase order.")
                     else:
                         if action=="Cancel booking":
                             proposed_start=selected["scheduled_start"]; proposed_end=selected["scheduled_end"]; duration=selected["duration_minutes"]; reason_text="CANCEL_REQUEST: "+reason
