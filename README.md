@@ -14,6 +14,7 @@ A standalone Streamlit application for Pontefract inbound delivery booking and w
 - Purchase-order Excel import/update, product and delivery-rule management
 - Shift staffing plans, staff register, absence records and area buffers
 - Booking history, CSV report export and queued supplier email notifications
+- Background Gmail dispatcher using GitHub Actions, with one initial attempt and up to two automatic retries
 
 ## Deployment
 
@@ -55,7 +56,9 @@ Dates should be Excel dates or values pandas can parse. Existing purchase orders
 - Enter the weekly staffing plan for each date and shift. Defaults are 4 day, 3 afternoon and 4 night main-team staff, with 2 protected for outbound/palletisation. Planned absences and additional operator availability must be kept current.
 - The main-team weekly rotation anchor and the additional operator's alternating-week anchor have not yet been supplied, so individual rosters are not auto-generated.
 - The dedicated bulk operator must be marked available on the relevant day-shift staffing plan when required.
-- Gmail delivery is not yet connected for this inbound deployment. Booking outcomes are written to the Supabase email outbox; they are not sent until an approved Gmail sending integration is configured.
+- Booking notifications are written to the Supabase email outbox and processed by the GitHub Actions background worker approximately every five minutes (GitHub may delay scheduled starts). The worker makes one initial send attempt and up to two retries on later runs before marking a message failed.
+- The worker requires the GitHub Actions repository secrets `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `GMAIL_APP_PASSWORD`. Keep these values private and never commit them to the repository.
+- An outbox status of `sent` means Gmail accepted the message via SMTP; it does not prove that the recipient's inbox received it. Review the queue and worker run logs when troubleshooting.
 - Validate the app with site users and IT before inviting external suppliers. Confirm supplier account handling, retention, and public view-only fields with site policy.
 
 ## Security model
