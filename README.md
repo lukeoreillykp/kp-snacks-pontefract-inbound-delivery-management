@@ -17,7 +17,9 @@ A standalone Streamlit application for Pontefract inbound delivery booking and w
 
 ## Deployment
 
-Deploy `app.py` on Streamlit Community Cloud using `requirements.txt`.
+Deploy `app.py` on Streamlit Community Cloud using `requirements.txt` for the internal portal.
+
+Deploy a second Streamlit Community Cloud app from the same repository with **Main file path** set to `supplier_app.py` for the separate external supplier portal. Give that second app the same private `[supabase]` Secrets section shown below. The two apps use the same inbound database but have separate navigation and access surfaces.
 
 Add these private Streamlit Secrets:
 
@@ -30,6 +32,8 @@ key = "YOUR_INBOUND_SUPABASE_SECRET_KEY"
 The first Administrator was created using a one-time `[bootstrap]` token. Keep that section removed after setup. Never commit Supabase secret keys or passwords to GitHub.
 
 ## Supplier onboarding
+
+Give each supplier the URL of the separate `supplier_app.py` deployment, not the internal portal URL.
 
 1. Add the supplier and contact email under **Suppliers**.
 2. Enable the supplier portal and set a strong shared supplier password.
