@@ -6,6 +6,9 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 from delivery_features import render_documents
+from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 from supabase import Client, create_client
 
 st.set_page_config(page_title="KP Snacks | Supplier Inbound Portal",page_icon="📦",layout="wide")
@@ -147,6 +150,27 @@ def portal(supplier):
             st.dataframe(pd.DataFrame(output),use_container_width=True,hide_index=True)
             csv_frame=pd.DataFrame(output)
             st.download_button("Download my bookings (CSV)",csv_frame.to_csv(index=False).encode("utf-8"),"my-inbound-bookings.csv","text/csv")
+            pdf_buffer=BytesIO()
+            pdf=canvas.Canvas(pdf_buffer,pagesize=A4)
+            width,height=A4
+            y=height-48
+            pdf.setTitle("My inbound bookings")
+            pdf.setFont("Helvetica-Bold",15)
+            pdf.drawString(42,y,"KP Snacks Pontefract — Supplier Bookings")
+            y-=28
+            pdf.setFont("Helvetica",9)
+            pdf.drawString(42,y,"Supplier: "+supplier["name"])
+            y-=24
+            for item in output:
+                line=str(item["Reference"])+" | PO: "+str(item["Purchase order"])+" | "+str(item["Product"])+" | "+str(item["Arrival"])+" | "+str(item["Status"])
+                if y<55:
+                    pdf.showPage()
+                    y=height-48
+                    pdf.setFont("Helvetica",9)
+                pdf.drawString(42,y,line[:115])
+                y-=16
+            pdf.save()
+            st.download_button("Download my bookings (PDF)",pdf_buffer.getvalue(),"my-inbound-bookings.pdf","application/pdf")
             st.markdown("### Delivery paperwork")
             for booking in mine:
                 with st.expander(f'{booking["booking_reference"]} · {fmt(booking["scheduled_start"])}'):
