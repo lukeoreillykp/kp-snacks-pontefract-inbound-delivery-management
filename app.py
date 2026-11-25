@@ -245,11 +245,14 @@ def booking_management():
         with st.container(border=True):
             st.markdown(f"**{b['booking_reference']} · {supplier['name'] if supplier else 'Supplier'} · {product['name'] if product else 'Product'}**")
             st.write(f"{fmt(b['scheduled_start'])} · {b['duration_minutes']} minutes · {b['status'].replace('_',' ').title()}")
+            adjusted_duration=st.number_input("Approved unloading duration (minutes)",15,600,int(b["duration_minutes"]),step=5,key=f"approval_duration_{b['id']}")
             c1,c2,c3=st.columns(3)
             if c1.button("Approve / confirm",key=f"approve_{b['id']}"):
-                db().table("bookings").update({"status":"confirmed","confirmed_at":local_now().isoformat(),"updated_at":local_now().isoformat()}).eq("id",b["id"]).execute()
-                log_event(b["id"],"booking_confirmed",b["status"],"confirmed")
-                enqueue_status_email(b,"confirmed"); st.rerun()
+                try:
+                    updated=db().rpc("approve_inbound_booking",{"p_booking_id":b["id"],"p_duration_minutes":int(adjusted_duration)}).execute().data
+                    updated=updated if isinstance(updated,dict) else (updated[0] if updated else b)
+                    enqueue_status_email(updated,"confirmed"); st.success("Booking confirmed."); st.rerun()
+                except Exception as e: st.error(f"Booking could not be approved: {e}")
             if c2.button("Reject",key=f"reject_{b['id']}"):
                 st.session_state["reject_id"]=b["id"]
             if c3.button("Propose alternative",key=f"alt_{b['id']}"):
