@@ -21,7 +21,6 @@ def request_json(url, key, method="GET", body=None):
         method=method,
         headers={
             "apikey": key,
-            "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
             "Prefer": "return=representation",
