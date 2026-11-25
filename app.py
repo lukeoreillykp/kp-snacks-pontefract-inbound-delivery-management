@@ -422,7 +422,7 @@ def orders_page():
                     else: created+=1
                     if item["conflict"]:
                         c=item["conflict"]
-                        db().table("po_import_issues").insert({"batch_id":preview["batch_id"],"purchase_order_id":c["purchase_order_id"],"supplier_id":c["supplier_id"],"po_number":c["po_number"],"issue_type":"quantity_below_committed","details":c,"resolution":"kept_existing_quantity","resolution_reason":"Uploaded quantity was below booked/delivered quantity; existing PO quantity retained.","resolved_by_role":st.session_state.get("auth_role"),"resolved_at":local_now().isoformat()}).execute()
+                        db().table("po_import_issues").insert({"batch_id":preview["batch_id"],"purchase_order_id":c["purchase_order_id"],"supplier_id":c["supplier_id"],"po_number":c["po_number"],"issue_type":"quantity_below_committed","details":c,"resolution":None,"resolution_reason":None,"resolved_by_role":None,"resolved_at":None}).execute()
                 except Exception as ex:
                     st.error(f'Could not update PO {payload["po_number"]}: {type(ex).__name__}')
             for item in preview["missing"]:
