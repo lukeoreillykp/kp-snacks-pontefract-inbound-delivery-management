@@ -1,4 +1,5 @@
 import streamlit as st
+from supabase import Client, create_client
 
 st.set_page_config(
     page_title="KP Snacks | Pontefract Inbound",
@@ -9,6 +10,27 @@ st.set_page_config(
 
 KP_RED = "#C8102E"
 DARK = "#292929"
+
+
+@st.cache_resource
+def get_supabase_client() -> Client:
+    """Create a server-side Supabase client using Streamlit Secrets."""
+    config = st.secrets["supabase"]
+    return create_client(config["url"], config["key"])
+
+
+def check_database_connection():
+    """Run a harmless read to verify the inbound database connection."""
+    try:
+        client = get_supabase_client()
+        client.table("app_settings").select("*").limit(1).execute()
+        return True, "Connected to the inbound database."
+    except KeyError:
+        return False, "Supabase settings are missing. Add [supabase] url and key in Streamlit Secrets."
+    except Exception as exc:
+        # Show a concise diagnostic without printing credentials or request headers.
+        return False, f"Database connection failed ({type(exc).__name__}). Check the Secrets and database access."
+
 
 st.markdown(
     f"""
@@ -31,6 +53,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+db_ok, db_message = check_database_connection()
+
 with st.sidebar:
     st.markdown("## KP Snacks")
     st.caption("Pontefract site")
@@ -49,6 +73,10 @@ with st.sidebar:
         ],
     )
     st.divider()
+    if db_ok:
+        st.success("Inbound database connected")
+    else:
+        st.error("Inbound database not connected")
     st.caption("Inbound Delivery Management")
 
 st.markdown(
@@ -63,7 +91,12 @@ st.markdown(
 
 if page == "Dashboard":
     st.subheader("Operational dashboard")
-    st.caption("Live operational figures will appear here once the secure database connection is configured.")
+    st.caption("Live operational figures will appear here as the application features are connected.")
+
+    if db_ok:
+        st.success(db_message)
+    else:
+        st.error(db_message)
 
     a, b, c, d = st.columns(4)
     a.metric("Expected today", "—")
@@ -81,7 +114,7 @@ if page == "Dashboard":
         st.info("Packaging bay capacity and operator availability will be displayed here.")
 
     st.markdown("### Today's activity")
-    st.info("No live bookings are connected yet. Booking data will be loaded from the inbound Supabase project.")
+    st.info("Booking and operational data will be connected in the next development stage.")
 
 elif page == "Delivery calendar":
     st.subheader("Delivery calendar")
