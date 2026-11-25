@@ -62,6 +62,6 @@ Dates should be Excel dates or values pandas can parse. Existing purchase orders
 - Shared role and supplier accounts identify the account/role in audit records, not the individual person using a shared password.
 - Capacity overrides require a reason and are recorded in booking history.
 
-## Validation
+## Automated validation
 
 A GitHub Actions workflow compiles the Python source on pushes and pull requests. Database capacity and change-approval functions have been exercised inside rollback-only test transactions.
