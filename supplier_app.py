@@ -303,6 +303,17 @@ def main():
     [data-testid="stExpander"] summary p{{color:#1f2937!important}}
     [data-baseweb="input"],[data-baseweb="select"],[data-baseweb="textarea"],
     [data-testid="stDateInput"] input,[data-testid="stTimeInput"] input{{background:#fff!important;color:#111827!important}}
+    /* High-contrast controls for light and dark browser themes. */
+    [data-baseweb="input"] input,[data-baseweb="textarea"] textarea,
+    [data-testid="stDateInput"] input,[data-testid="stTimeInput"] input{{background:#fff!important;color:#111827!important;-webkit-text-fill-color:#111827!important}}
+    [data-baseweb="select"]>div{{background:#fff!important;color:#111827!important;border-color:#9ca3af!important}}
+    [data-baseweb="select"] input{{color:#111827!important;-webkit-text-fill-color:#111827!important}}
+    [role="option"],[role="listbox"],[data-baseweb="popover"],[data-baseweb="menu"]{{background:#fff!important;color:#111827!important}}
+    [data-testid="stButton"] button,[data-testid="stFormSubmitButton"] button,
+    [data-testid="stDownloadButton"] button{{background:#C8102E!important;color:#fff!important;border:1px solid #9f0c24!important}}
+    [data-testid="stButton"] button *,[data-testid="stFormSubmitButton"] button *,
+    [data-testid="stDownloadButton"] button *{{color:#fff!important}}
+    input::placeholder,textarea::placeholder{{color:#6b7280!important;opacity:1!important}}
     [data-testid="stDataFrame"]{{border:1px solid #d1d5db;border-radius:.5rem}}
     .supplier-header{{background:{KP_RED};color:white;padding:1.2rem 1.5rem;border-radius:.5rem;margin-bottom:1.2rem}}
     .supplier-header h1{{color:white;margin:0;font-size:1.8rem}}
