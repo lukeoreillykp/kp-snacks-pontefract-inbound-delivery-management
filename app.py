@@ -20,7 +20,7 @@ PAGES = ["Dashboard","Delivery calendar","Booking management","Delivery arrivals
 ROLE_PAGES = {
     "supervisor": set(PAGES[:4]),
     "material_controller": set(PAGES[:4] + ["Orders & Excel upload","Products & delivery rules","Reports"]),
-    "warehouse_manager": set(PAGES[:4] + ["Warehouse resources","Reports"]),
+    "warehouse_manager": set(PAGES[:4] + ["Warehouse resources","Arrival reminder settings","Reports"]),
     "administrator": set(PAGES),
 }
 ACTIVE_BOOKING = ["requested","alternative_proposed","confirmed"]
