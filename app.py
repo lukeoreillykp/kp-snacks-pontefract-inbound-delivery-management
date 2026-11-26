@@ -515,9 +515,29 @@ def orders_page():
             for item in preview["candidates"]:
                 payload=item["payload"]
                 try:
-                    db().table("purchase_orders").upsert(payload,on_conflict="supplier_id,po_number,product_id").execute()
-                    if item["old"]: updated+=1
-                    else: created+=1
+                    saved=db().table("purchase_orders").upsert(payload,on_conflict="supplier_id,po_number,product_id").execute().data or []
+                    if item["old"]:
+                        updated+=1
+                    else:
+                        created+=1
+                        supplier=one("suppliers",id=payload["supplier_id"])
+                        product=one("products",id=payload["product_id"])
+                        if supplier and supplier.get("contact_email"):
+                            queue_email(
+                                supplier,
+                                f"New inbound purchase order {payload['po_number']} – KP Snacks Pontefract",
+                                "purchase_order_added",
+                                {
+                                    "purchase_order":payload["po_number"],
+                                    "supplier":supplier.get("name"),
+                                    "product":product.get("name") if product else "",
+                                    "quantity":payload.get("quantity"),
+                                    "quantity_unit":payload.get("quantity_unit"),
+                                    "due_date":payload.get("due_date"),
+                                    "latest_delivery_date":payload.get("latest_delivery_date"),
+                                    "status":"New purchase order added – please log in to the supplier portal to arrange a delivery booking. No delivery slot has been confirmed."
+                                }
+                            )
                     if item["conflict"]:
                         c=item["conflict"]
                         db().table("po_import_issues").insert({"batch_id":preview["batch_id"],"purchase_order_id":c["purchase_order_id"],"supplier_id":c["supplier_id"],"po_number":c["po_number"],"issue_type":"quantity_below_committed","details":c,"resolution":None,"resolution_reason":None,"resolved_by_role":None,"resolved_at":None}).execute()
