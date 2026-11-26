@@ -928,6 +928,18 @@ def main():
     [data-testid="stMetric"] label,[data-testid="stMetricValue"],[data-testid="stMetricDelta"]{{color:#111827!important}}
     [data-baseweb="input"],[data-baseweb="select"],[data-baseweb="textarea"],
     [data-testid="stDateInput"] input,[data-testid="stTimeInput"] input{{background:#fff!important;color:#111827!important}}
+    /* High-contrast controls: never pair dark text with dark control surfaces. */
+    [data-baseweb="input"] input,[data-baseweb="textarea"] textarea,
+    [data-testid="stDateInput"] input,[data-testid="stTimeInput"] input{{background:#fff!important;color:#111827!important;-webkit-text-fill-color:#111827!important}}
+    [data-baseweb="select"]>div{{background:#fff!important;color:#111827!important;border-color:#9ca3af!important}}
+    [data-baseweb="select"] input{{color:#111827!important;-webkit-text-fill-color:#111827!important}}
+    [role="option"],[role="listbox"],[data-baseweb="popover"],[data-baseweb="menu"]{{background:#fff!important;color:#111827!important}}
+    [data-testid="stButton"] button,[data-testid="stFormSubmitButton"] button,
+    [data-testid="stDownloadButton"] button{{background:#C8102E!important;color:#fff!important;border:1px solid #9f0c24!important}}
+    [data-testid="stButton"] button *,[data-testid="stFormSubmitButton"] button *,
+    [data-testid="stDownloadButton"] button *{{color:#fff!important}}
+    [data-testid="stButton"] button:disabled,[data-testid="stFormSubmitButton"] button:disabled{{background:#e5e7eb!important;color:#4b5563!important}}
+    input::placeholder,textarea::placeholder{{color:#6b7280!important;opacity:1!important}}
     [data-testid="stDataFrame"]{{border:1px solid #d1d5db;border-radius:.5rem}}
     [data-testid="stSidebar"]{{background:#252525}}
     [data-testid="stSidebar"] *{{color:#fff!important}}
