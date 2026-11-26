@@ -640,57 +640,8 @@ def warehouse_page():
                 else:
                     db().table("staff_shift_assignments").insert({"staff_member_id":selected["id"],"shift_id":selected_shift["id"],"starts_at":datetime.combine(start,time(0),TZ).isoformat(),"ends_at":datetime.combine(end+timedelta(days=1),time(0),TZ).isoformat(),"assignment_type":typ,"notes":note}).execute()
                     st.success("Absence record saved."); st.rerun()
-    st.markdown("### Assign operators to deliveries")
-    active_bookings=[b for b in rows("bookings") if b.get("status") in ACTIVE_BOOKING]
-    active_staff=[x for x in rows("staff_members") if x.get("active")]
-    if active_bookings and active_staff:
-        with st.form("operator_assignment"):
-            booking=st.selectbox("Delivery booking",active_bookings,format_func=lambda x:f"{x['booking_reference']} · {fmt(x['scheduled_start'])}")
-            operator=st.selectbox("Operator",active_staff,format_func=lambda x:f"{x['display_name']} · {x['staff_group']}")
-            assign=st.form_submit_button("Assign operator")
-        if assign:
-            already=[x for x in rows("booking_operator_assignments") if x["booking_id"]==booking["id"]]
-            if len(already)>=int(booking.get("operators_required",1)):
-                st.error("This booking already has the required number of operators.")
-            else:
-                booking_start=datetime.fromisoformat(str(booking["scheduled_start"]).replace("Z","+00:00")).astimezone(TZ)
-                booking_end=datetime.fromisoformat(str(booking["scheduled_end"]).replace("Z","+00:00")).astimezone(TZ)
-                booking_buffer=int(booking.get("buffer_minutes") or 0)
-                coverage_end=booking_end+timedelta(minutes=booking_buffer)
-                coverage_start_iso=booking_start.isoformat()
-                coverage_end_iso=coverage_end.isoformat()
-                conflicts=[]
-                for x in rows("booking_operator_assignments"):
-                    if x["staff_member_id"]!=operator["id"]: continue
-                    if str(x["starts_at"])<coverage_end_iso and str(x["ends_at"])>coverage_start_iso: conflicts.append(x)
-                absences=[x for x in rows("staff_shift_assignments") if x["staff_member_id"]==operator["id"] and x["assignment_type"] in ("holiday","absence") and str(x["starts_at"])<coverage_end_iso and str(x["ends_at"])>coverage_start_iso]
-                rule=get_rule(booking["product_id"])
-                booking_shift=booking_shift_code(booking)
-                booking_date=booking_start.date()
-                allowed_shifts=operator.get("allowed_shift_codes") or []
-                team_colour=operator.get("team_colour")
-                individual_shift=individual_shift_for_date(operator["display_name"],booking_date)
-                team_shift=team_shift_for_date(team_colour,booking_date) if team_colour else None
-                if conflicts: st.error("This operator is already assigned to an overlapping delivery.")
-                elif absences: st.error("This operator has a holiday or absence recorded during this delivery.")
-                elif individual_shift and booking_shift!=individual_shift: st.error(f"{operator['display_name']} is on {individual_shift.title()} for this week, not {booking_shift or 'the selected'} shift.")
-                elif team_colour and team_shift and booking_shift!=team_shift: st.error(f"{operator['display_name']} is in the {team_colour.title()} team, which is on {team_shift.title()} for this week.")
-                elif operator["staff_group"]=="main_team" and not team_colour and not individual_shift and not allowed_shifts: st.error("Assign this main-team operator to a colour team before allocating deliveries.")
-                elif allowed_shifts and booking_shift and booking_shift not in allowed_shifts: st.error(f"{operator['display_name']} is not available for {booking_shift} shift.")
-                elif rule and rule.get("requires_dedicated_bulk_operator") and operator["staff_group"]!="dedicated_bulk": st.error("This product requires the dedicated bulk operator.")
-                elif operator["staff_group"]=="dedicated_bulk" and operator["display_name"] not in [x["display_name"] for x in dedicated_bulk_staff_for_shift(booking_shift,booking_date)]: st.error("The dedicated bulk operator is not rostered or is absent for this shift.")
-                else:
-                    db().table("booking_operator_assignments").insert({"booking_id":booking["id"],"staff_member_id":operator["id"],"starts_at":booking["scheduled_start"],"ends_at":coverage_end.isoformat()}).execute()
-                    log_event(booking["id"],"operator_assigned",booking["status"],booking["status"],None,{"staff_member":operator["display_name"]})
-                    st.success(f"Operator assigned for the full offload and buffer window, through {coverage_end.strftime('%H:%M')}."); st.rerun()
-    elif not active_staff: st.info("Add staff members before assigning operators.")
-    if active_bookings:
-        assignments=rows("booking_operator_assignments")
-        display=[]
-        for a in assignments:
-            b=one("bookings",id=a["booking_id"]); person=one("staff_members",id=a["staff_member_id"])
-            if b and person: display.append({"Booking":b["booking_reference"],"Operator":person["display_name"],"Start":fmt(a["starts_at"]),"End":fmt(a["ends_at"])})
-        if display: st.dataframe(pd.DataFrame(display),use_container_width=True,hide_index=True)
+    st.markdown("### Inbound resource availability")
+    st.caption("Operator availability is checked automatically against each shift's staffing plan, existing two-person warehouse/palletisation protection, absences and other active bookings. No individual operator allocation is required.")
 
 def rules_page():
     st.subheader("Products & delivery rules")
