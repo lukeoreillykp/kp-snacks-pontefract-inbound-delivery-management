@@ -148,7 +148,7 @@ def process_arrival_reminders(base,key):
     manager=(contacts or {}).get("warehouse_manager")
     pending=get_rows(base,key,"bookings",{
         "select":"id,booking_reference,scheduled_start,scheduled_end,status,actual_arrival_at,supplier_id,product_id",
-        "status":"eq.confirmed","actual_arrival_at":"is.null",
+        "status":"in.(confirmed,completed)","actual_arrival_at":"is.null",
         "scheduled_start":f"lte.{now.isoformat()}",
         "order":"scheduled_start.asc","limit":"100"
     })
