@@ -5,7 +5,7 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from zoneinfo import ZoneInfo
 
@@ -24,7 +24,7 @@ def request_json(url, key, method="GET", body=None):
             "apikey": key,
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "Prefer": "return=representation",
+            "Prefer": "return=representation,resolution=merge-duplicates",
         },
     )
     with urllib.request.urlopen(req, timeout=25) as response:
@@ -123,7 +123,11 @@ def captain_for_shift(config, shift_code, shift_start_date):
 
 def process_arrival_reminders(base,key):
     now=datetime.now(ZoneInfo("Europe/London"))
-    holiday_dates=uk_bank_holidays()
+    try:
+        holiday_dates=uk_bank_holidays()
+    except Exception as exc:
+        print(f"Arrival reminders paused: could not verify UK bank holidays ({type(exc).__name__}).")
+        return
     if now.weekday()>=5 or now.date().isoformat() in holiday_dates:
         print("Arrival reminders paused: weekend or England/Wales bank holiday.")
         return
