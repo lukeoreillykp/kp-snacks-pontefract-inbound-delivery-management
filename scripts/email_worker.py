@@ -24,7 +24,7 @@ def request_json(url, key, method="GET", body=None):
             "apikey": key,
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "Prefer": "return=representation,resolution=merge-duplicates" if method == "POST" else "return=representation",
+            "Prefer": "return=representation,resolution=merge-duplicates" if method == "POST" and "on_conflict=" in url else "return=representation",
         },
     )
     with urllib.request.urlopen(req, timeout=25) as response:
