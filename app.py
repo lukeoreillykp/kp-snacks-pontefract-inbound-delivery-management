@@ -582,8 +582,19 @@ def warehouse_page():
             if captain and captain.get("team"):
                 st.caption(f"{captain['team']} team · this total includes {captain['captain'] or 'the Team Captain'}. The headcount follows this team as its shift rotates.")
             holiday=st.number_input("People on holiday (maximum 1 per shift)",0,1,int(existing["people_on_holiday"]) if existing else 0)
-            extra_default=(existing["additional_operator_available"] if existing else individual_shift_for_date("Carl Everitt",day)==shift["shift_code"])
-            extra=st.checkbox("Additional operator available",bool(extra_default))
+            carl_rostered=individual_shift_for_date("Carl Everitt",day)==shift["shift_code"]
+            carl_absent=any(
+                a.get("staff_member_id")==next((p["id"] for p in rows("staff_members") if p.get("active") and p.get("display_name","").strip().lower()=="carl everitt"),None)
+                and a.get("assignment_type") in ("holiday","absence")
+                and a.get("shift_id")==shift["id"]
+                and str(a.get("starts_at",""))<datetime.combine(day+timedelta(days=1),time(0),TZ).isoformat()
+                and str(a.get("ends_at",""))>datetime.combine(day,time(0),TZ).isoformat()
+                for a in rows("staff_shift_assignments")
+            )
+            if carl_rostered and not carl_absent:
+                st.caption("Carl Everitt is automatically included in this shift's available headcount.")
+            else:
+                st.caption("Carl Everitt is not included in this shift's headcount (not rostered or recorded absent).")
             bulk_staff=dedicated_bulk_staff_for_shift(shift["shift_code"],day)
             bulk=bool(bulk_staff)
             if bulk_staff:
@@ -596,10 +607,10 @@ def warehouse_page():
             if captain and captain.get("team"):
                 team_counts[(captain["team"].lower())]=int(head)
                 db().table("app_settings").upsert({"setting_key":"team_headcounts","setting_value":team_counts,"description":"Total operators per colour team, including the Team Captain."},on_conflict="setting_key").execute()
-            payload={"plan_date":day.isoformat(),"shift_id":shift["id"],"main_team_headcount":head,"people_on_holiday":holiday,"additional_operator_available":extra,"additional_operator_count":1 if extra else 0,"bulk_operator_available":bulk,"protected_outbound_headcount":2,"notes":note}
+            payload={"plan_date":day.isoformat(),"shift_id":shift["id"],"main_team_headcount":head,"people_on_holiday":holiday,"additional_operator_available":False,"additional_operator_count":0,"bulk_operator_available":bulk,"protected_outbound_headcount":2,"notes":note}
             db().table("staffing_plans").upsert(payload,on_conflict="plan_date,shift_id").execute()
             st.success(f"{shift['display_name']} staffing saved."); st.rerun()
-    st.caption("Capacity planning protects two people for outbound/palletisation. Colour-team headcounts include the Team Captain and follow the team through its weekly shift rotation. Set each team's total once; the same total carries to its next shift.")
+    st.caption("Capacity planning automatically includes Carl Everitt when his individual rota places him on Days or Afternoons and he is not recorded absent. Two people remain protected for outbound/palletisation. Colour-team headcounts include the Team Captain and follow the team through its weekly shift rotation.")
     st.markdown("### Staff / absence register")
     with st.form("staff_add"):
         name=st.text_input("Staff display name")
