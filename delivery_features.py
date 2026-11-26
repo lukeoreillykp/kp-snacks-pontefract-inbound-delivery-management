@@ -14,11 +14,17 @@ def _rows(db, table, **filters):
 
 def arrival_page(db, role):
     st.subheader("Delivery arrival confirmation")
-    st.caption("Record only the actual arrival time and whether the delivered quantity was correct.")
+    st.caption("Outstanding deliveries must be confirmed by the Team Captain / shift team currently on duty. Record the actual arrival time and whether the delivered quantity was correct.")
+    if eligible:
+        st.warning(f"{len(eligible)} delivery arrival confirmation(s) outstanding. Please record each arrival before the shift ends.")
+        st.dataframe(pd.DataFrame([{"Booking":b.get("booking_reference"),"Expected arrival":b.get("scheduled_start"),"Status":"Awaiting arrival confirmation"} for b in eligible]),use_container_width=True,hide_index=True)
+    else:
+        st.success("All confirmed deliveries have an arrival confirmation recorded.")
     bookings = _rows(db, "bookings")
-    eligible = [b for b in bookings if b.get("status") in ("confirmed", "completed")]
+    eligible = [b for b in bookings if b.get("status") == "confirmed" and not b.get("actual_arrival_at")]
+    eligible.sort(key=lambda b: b.get("scheduled_start") or "")
     if not eligible:
-        st.info("There are no confirmed deliveries to record.")
+        st.info("There are no outstanding confirmed deliveries to record.")
         return
     suppliers = {x["id"]: x for x in _rows(db, "suppliers")}
     products = {x["id"]: x for x in _rows(db, "products")}
