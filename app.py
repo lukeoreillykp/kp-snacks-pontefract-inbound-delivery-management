@@ -674,7 +674,7 @@ def rules_page():
             else:
                 inserted=db().table("products").insert({"name":new_name.strip(),"category":category,"delivery_method":method,"quantity_unit":unit.strip() or None,"max_quantity":max_quantity if max_quantity>0 else None,"active":True}).execute().data
                 if inserted:
-                    db().table("product_rules").insert({"product_id":inserted[0]["id"],"delivery_area_id":area["id"],"standard_duration_minutes":duration,"min_duration_minutes":min_duration,"max_duration_minutes":max_duration,"duration_mode":"manager_adjustable" if min_duration!=max_duration else "fixed","operators_required":1,"buffer_minutes":None,"permitted_shifts":permitted,"requires_dedicated_bulk_operator":dedicated,"active":True}).execute()
+                    db().table("product_rules").insert({"product_id":inserted[0]["id"],"delivery_area_id":area["id"],"standard_duration_minutes":duration,"min_duration_minutes":min_duration,"max_duration_minutes":max_duration,"duration_mode":"manager_adjustable" if min_duration!=max_duration else "fixed","operators_required":1,"buffer_minutes":None,"permitted_shifts":permitted,"requires_dedicated_bulk_operator":False,"active":True}).execute()
                     st.success("Product added to catalogue and delivery rules."); st.rerun()
     for p in products:
         rule=get_rule(p["id"])
@@ -692,7 +692,6 @@ def rules_page():
                 area=st.selectbox("Delivery area",areas,index=next((i for i,a in enumerate(areas) if a["id"]==rule["delivery_area_id"]),0),format_func=lambda x:x["name"])
                 operators=st.number_input("Operators required",1,10,int(rule["operators_required"]))
                 permitted=st.multiselect("Permitted shifts",["days","afternoons","nights"],default=rule.get("permitted_shifts") or ["days","afternoons","nights"])
-                dedicated=st.checkbox("Requires dedicated bulk inbound operator",bool(rule.get("requires_dedicated_bulk_operator")))
                 save=st.form_submit_button("Save product rule")
             if save:
                 if minimum>maximum: st.error("Minimum duration cannot exceed maximum.")
