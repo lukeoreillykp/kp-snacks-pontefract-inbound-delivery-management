@@ -41,8 +41,13 @@ def build_message(item):
     details = []
     for key, label in (
         ("booking_reference", "Booking reference"),
+        ("purchase_order", "Purchase order"),
         ("supplier", "Supplier"),
         ("product", "Product"),
+        ("quantity", "Quantity"),
+        ("quantity_unit", "Unit"),
+        ("due_date", "Due date"),
+        ("latest_delivery_date", "Latest delivery date"),
         ("status", "Status"),
         ("scheduled_start", "Scheduled arrival"),
         ("proposed_start", "Proposed arrival"),
