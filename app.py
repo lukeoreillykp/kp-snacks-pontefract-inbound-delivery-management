@@ -16,7 +16,7 @@ TZ = ZoneInfo("Europe/London")
 KP_RED = "#C8102E"
 ROLES = ["supervisor", "material_controller", "warehouse_manager", "administrator"]
 ROLE_LABELS = {"supervisor":"Team Captain","material_controller":"Material Controller","warehouse_manager":"Warehouse Manager","administrator":"Administrator"}
-PAGES = ["Dashboard","Delivery calendar","Booking management","Delivery arrivals","Orders & Excel upload","Warehouse resources","Products & delivery rules","Suppliers","Reports","User & role management"]
+PAGES = ["Dashboard","Delivery calendar","Booking management","Delivery arrivals","Orders & Excel upload","Warehouse resources","Products & delivery rules","Suppliers","Arrival reminder settings","Reports","User & role management"]
 ROLE_PAGES = {
     "supervisor": set(PAGES[:4]),
     "material_controller": set(PAGES[:4] + ["Orders & Excel upload","Products & delivery rules","Reports"]),
@@ -727,6 +727,34 @@ def rules_page():
             save=st.form_submit_button("Save buffer")
         if save: db().table("delivery_areas").update({"buffer_minutes":buf}).eq("id",a["id"]).execute(); st.success("Buffer saved."); st.rerun()
 
+def arrival_reminder_settings_page():
+    st.subheader("Arrival reminder routing")
+    setting=one("app_settings",setting_key="arrival_reminder_contacts")
+    config=(setting or {}).get("setting_value") or {}
+    captains=config.get("captains") or {}
+    rota=(one("app_settings",setting_key="team_captain_rota") or {}).get("setting_value") or {}
+    st.caption("Enter each Team Captain's email address and the Warehouse Manager's email. Reminders follow the captain currently covering the live shift, not the original offloading team.")
+    with st.form("arrival_reminder_contacts"):
+        updated={}
+        for team,details in (rota.get("teams") or {}).items():
+            captain=details.get("captain")
+            if captain:
+                updated[captain]=st.text_input(f"{team.title()} Team Captain — {captain}",value=captains.get(captain,""))
+        manager=st.text_input("Warehouse Manager email (CC after two reminders)",value=config.get("warehouse_manager",""))
+        save=st.form_submit_button("Save arrival reminder contacts",type="primary")
+    if save:
+        addresses=[x for x in list(updated.values())+[manager] if x.strip()]
+        invalid=[x for x in addresses if "@" not in x or "." not in x.split("@")[-1]]
+        if invalid:
+            st.error("Check these email addresses: "+", ".join(invalid))
+        elif any(not updated.get((details or {}).get("captain",""),"").strip() for details in (rota.get("teams") or {}).values()):
+            st.error("Enter an email address for all three Team Captains.")
+        elif not manager.strip():
+            st.error("Enter the Warehouse Manager email address.")
+        else:
+            db().table("app_settings").upsert({"setting_key":"arrival_reminder_contacts","setting_value":{"captains":updated,"warehouse_manager":manager.strip()},"description":"Email routing for overdue delivery arrival confirmations."},on_conflict="setting_key").execute()
+            st.success("Arrival reminder contacts saved."); st.rerun()
+
 def suppliers_page():
     st.subheader("Supplier management")
     setting=one("app_settings",setting_key="internal_notification_emails")
@@ -1001,6 +1029,9 @@ def main():
     elif page=="Warehouse resources": warehouse_page()
     elif page=="Products & delivery rules": rules_page()
     elif page=="Suppliers": suppliers_page()
+    elif page=="Arrival reminder settings":
+        if role not in ("warehouse_manager","administrator"): st.error("Warehouse Manager or Administrator access required.")
+        else: arrival_reminder_settings_page()
     elif page=="Reports":
         reports_page()
         st.divider()
