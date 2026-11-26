@@ -37,6 +37,8 @@ def build_message(item):
     message["From"] = SENDER
     message["To"] = item["recipient_email"]
     message["Subject"] = item["subject"]
+    if item.get("cc_email"):
+        message["Cc"] = item["cc_email"]
     payload = item.get("payload") or {}
     details = []
     for key, label in (
@@ -64,6 +66,123 @@ def build_message(item):
     return message
 
 
+
+def get_rows(base, key, table, params):
+    query = urllib.parse.urlencode(params)
+    return request_json(f"{base}/rest/v1/{table}?{query}", key) or []
+
+
+def setting_value(base, key, name, default=None):
+    rows = get_rows(base, key, "app_settings", {"select":"setting_value","setting_key":f"eq.{name}","limit":"1"})
+    return rows[0].get("setting_value", default) if rows else default
+
+
+def uk_bank_holidays():
+    url = "https://www.gov.uk/bank-holidays.json"
+    with urllib.request.urlopen(url, timeout=15) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    return {item["date"] for item in data.get("england-and-wales",{}).get("events",[])}
+
+
+def shift_now(base, key, now):
+    weekday = now.isoweekday()
+    clock = now.time().replace(tzinfo=None)
+    shifts = get_rows(base,key,"shift_hours",{"select":"*","active":"eq.true"})
+    definitions = {x["id"]:x for x in get_rows(base,key,"shift_definitions",{"select":"*","active":"eq.true"})}
+    for h in shifts:
+        shift=definitions.get(h["shift_id"])
+        if not shift: continue
+        day=int(h["iso_weekday"])
+        start=datetime.strptime(h["start_time"],"%H:%M:%S").time()
+        end=datetime.strptime(h["end_time"],"%H:%M:%S").time()
+        if not h["ends_next_day"] and day==weekday and start<=clock<end:
+            return shift["shift_code"], now.date()
+        if h["ends_next_day"]:
+            if day==weekday and clock>=start:
+                return shift["shift_code"], now.date()
+            previous=7 if weekday==1 else weekday-1
+            if day==previous and clock<end:
+                return shift["shift_code"], now.date()-timedelta(days=1)
+    return None,None
+
+
+def captain_for_shift(config, shift_code, shift_start_date):
+    teams=(config or {}).get("teams") or {}
+    anchor=(config or {}).get("anchor_week_start")
+    if not anchor: return None
+    weeks=(shift_start_date-date.fromisoformat(anchor)).days//7
+    rotation=(config or {}).get("rotation") or {"days":"nights","nights":"afternoons","afternoons":"days"}
+    for team,details in teams.items():
+        current=details.get("shift")
+        for _ in range(weeks % 3):
+            current=rotation.get(current,current)
+        if current==shift_code:
+            return details.get("captain")
+    return None
+
+
+def process_arrival_reminders(base,key):
+    now=datetime.now(ZoneInfo("Europe/London"))
+    holiday_dates=uk_bank_holidays()
+    if now.weekday()>=5 or now.date().isoformat() in holiday_dates:
+        print("Arrival reminders paused: weekend or England/Wales bank holiday.")
+        return
+    shift_code,shift_start_date=shift_now(base,key,now)
+    if not shift_code:
+        print("Arrival reminders paused: outside configured shift hours.")
+        return
+    rota=setting_value(base,key,"team_captain_rota",{})
+    contacts=setting_value(base,key,"arrival_reminder_contacts",{})
+    captain=captain_for_shift(rota,shift_code,shift_start_date)
+    recipient=((contacts or {}).get("captains") or {}).get(captain or "")
+    if not captain or not recipient:
+        print(f"Arrival reminders paused: no email configured for current {shift_code} captain.")
+        return
+    manager=(contacts or {}).get("warehouse_manager")
+    pending=get_rows(base,key,"bookings",{
+        "select":"id,booking_reference,scheduled_start,scheduled_end,status,actual_arrival_at,supplier_id,product_id",
+        "status":"eq.confirmed","actual_arrival_at":"is.null",
+        "scheduled_start":f"lte.{now.isoformat()}",
+        "order":"scheduled_start.asc","limit":"100"
+    })
+    if not pending: return
+    states=get_rows(base,key,"arrival_reminder_state",{"select":"*","limit":"1000"})
+    state_by_booking={x["booking_id"]:x for x in states}
+    suppliers={x["id"]:x for x in get_rows(base,key,"suppliers",{"select":"id,name","limit":"1000"})}
+    products={x["id"]:x for x in get_rows(base,key,"products",{"select":"id,name","limit":"1000"})}
+    for booking in pending:
+        state=state_by_booking.get(booking["id"],{})
+        count=int(state.get("reminder_count") or 0)
+        last=state.get("last_reminded_at")
+        if last:
+            last_dt=datetime.fromisoformat(last.replace("Z","+00:00")).astimezone(ZoneInfo("Europe/London"))
+            if now-last_dt < timedelta(hours=2): continue
+        supplier=suppliers.get(booking.get("supplier_id"),{}).get("name","Supplier")
+        product=products.get(booking.get("product_id"),{}).get("name","Delivery")
+        scheduled=datetime.fromisoformat(booking["scheduled_start"].replace("Z","+00:00")).astimezone(ZoneInfo("Europe/London"))
+        next_count=count+1
+        cc=manager if next_count>2 and manager else None
+        subject=f"Arrival confirmation required – {booking['booking_reference']}"
+        payload={
+            "booking_reference":booking["booking_reference"],
+            "supplier":supplier,"product":product,
+            "scheduled_start":scheduled.strftime("%d/%m/%Y %H:%M"),
+            "status":f"Reminder {next_count}: please confirm whether this delivery has arrived in the Delivery arrivals screen. This reminder is assigned to the {shift_code.title()} shift Team Captain ({captain})."
+        }
+        request_json(f"{base}/rest/v1/email_outbox",key,"POST",{
+            "booking_id":booking["id"],"recipient_email":recipient,"cc_email":cc,
+            "subject":subject,"template_key":"arrival_confirmation_reminder",
+            "payload":payload,"status":"queued"
+        })
+        state_payload={
+            "booking_id":booking["id"],"reminder_count":next_count,
+            "last_reminded_at":now.isoformat(),"last_recipient_email":recipient,
+            "last_shift_code":shift_code,"updated_at":now.isoformat()
+        }
+        request_json(f"{base}/rest/v1/arrival_reminder_state?on_conflict=booking_id",key,"POST",state_payload)
+    print(f"Arrival reminders evaluated for {len(pending)} overdue confirmed booking(s).")
+
+
 def main():
     base = os.environ["SUPABASE_URL"].strip().rstrip("/")
     key = os.environ["SUPABASE_SERVICE_ROLE_KEY"].strip()
@@ -75,6 +194,7 @@ def main():
         "limit": "10",
     })
     endpoint = f"{base}/rest/v1/email_outbox?{query}"
+    process_arrival_reminders(base,key)
     pending = request_json(endpoint, key) or []
     if not pending:
         print("Email queue checked: no queued messages.")
