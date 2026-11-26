@@ -135,6 +135,9 @@ def process_arrival_reminders(base,key):
     if not shift_code:
         print("Arrival reminders paused: outside configured shift hours.")
         return
+    if shift_start_date.isoformat() in holiday_dates:
+        print("Arrival reminders paused: current overnight shift began on a bank holiday.")
+        return
     rota=setting_value(base,key,"team_captain_rota",{})
     contacts=setting_value(base,key,"arrival_reminder_contacts",{})
     captain=captain_for_shift(rota,shift_code,shift_start_date)
