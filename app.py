@@ -113,6 +113,32 @@ def individual_shift_for_date(staff_name, on_date):
     except Exception:
         return None
 
+def dedicated_bulk_staff_for_shift(shift_code, on_date):
+    """Return dedicated bulk operators rostered on this shift and not absent."""
+    available=[]
+    staff=[x for x in rows("staff_members") if x.get("active") and x.get("staff_group")=="dedicated_bulk"]
+    assignments=rows("staff_shift_assignments")
+    day_start=datetime.combine(on_date,time(0,0),TZ)
+    day_end=day_start+timedelta(days=1)
+    for person in staff:
+        individual_shift=individual_shift_for_date(person.get("display_name"),on_date)
+        team_colour=person.get("team_colour")
+        team_shift=team_shift_for_date(team_colour,on_date) if team_colour else None
+        allowed=person.get("allowed_shift_codes") or []
+        rostered=individual_shift or team_shift or (shift_code if allowed and shift_code in allowed else None)
+        if rostered!=shift_code:
+            continue
+        absent=any(
+            a.get("staff_member_id")==person["id"]
+            and a.get("assignment_type") in ("holiday","absence")
+            and str(a.get("starts_at",""))<day_end.isoformat()
+            and str(a.get("ends_at",""))>day_start.isoformat()
+            for a in assignments
+        )
+        if not absent:
+            available.append(person)
+    return available
+
 def team_captain_for_shift(shift_code, on_date):
     config=one("app_settings",setting_key="team_captain_rota")
     config=(config or {}).get("setting_value") or {}
@@ -558,8 +584,12 @@ def warehouse_page():
             holiday=st.number_input("People on holiday (maximum 1 per shift)",0,1,int(existing["people_on_holiday"]) if existing else 0)
             extra_default=(existing["additional_operator_available"] if existing else individual_shift_for_date("Carl Everitt",day)==shift["shift_code"])
             extra=st.checkbox("Additional operator available",bool(extra_default))
-            bulk=st.checkbox("Dedicated bulk operator available",bool(existing["bulk_operator_available"]) if existing else (shift["shift_code"]=="days"),disabled=shift["shift_code"]!="days")
-            if shift["shift_code"]!="days": bulk=False
+            bulk_staff=dedicated_bulk_staff_for_shift(shift["shift_code"],day)
+            bulk=bool(bulk_staff)
+            if bulk_staff:
+                st.caption("Dedicated bulk operator automatically available: "+", ".join(x["display_name"] for x in bulk_staff))
+            else:
+                st.caption("No dedicated bulk operator rostered and available on this shift.")
             note=st.text_input("Notes",value=existing.get("notes","") if existing else "")
             save=st.form_submit_button("Save shift plan")
         if save:
@@ -643,6 +673,7 @@ def warehouse_page():
                 elif operator["staff_group"]=="main_team" and not team_colour and not individual_shift and not allowed_shifts: st.error("Assign this main-team operator to a colour team before allocating deliveries.")
                 elif allowed_shifts and booking_shift and booking_shift not in allowed_shifts: st.error(f"{operator['display_name']} is not available for {booking_shift} shift.")
                 elif rule and rule.get("requires_dedicated_bulk_operator") and operator["staff_group"]!="dedicated_bulk": st.error("This product requires the dedicated bulk operator.")
+                elif operator["staff_group"]=="dedicated_bulk" and operator["display_name"] not in [x["display_name"] for x in dedicated_bulk_staff_for_shift(booking_shift,booking_date)]: st.error("The dedicated bulk operator is not rostered or is absent for this shift.")
                 else:
                     db().table("booking_operator_assignments").insert({"booking_id":booking["id"],"staff_member_id":operator["id"],"starts_at":booking["scheduled_start"],"ends_at":booking["scheduled_end"]}).execute()
                     log_event(booking["id"],"operator_assigned",booking["status"],booking["status"],None,{"staff_member":operator["display_name"]})
