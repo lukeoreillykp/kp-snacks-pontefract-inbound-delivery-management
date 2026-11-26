@@ -556,7 +556,8 @@ def warehouse_page():
             if captain and captain.get("team"):
                 st.caption(f"{captain['team']} team · this total includes {captain['captain'] or 'the Team Captain'}. The headcount follows this team as its shift rotates.")
             holiday=st.number_input("People on holiday (maximum 1 per shift)",0,1,int(existing["people_on_holiday"]) if existing else 0)
-            extra_default=(existing["additional_operator_available"] if existing else individual_shift_for_date("Carl Everitt",day)==shift["shift_code"])\n            extra=st.checkbox("Additional operator available",bool(extra_default))
+            extra_default=(existing["additional_operator_available"] if existing else individual_shift_for_date("Carl Everitt",day)==shift["shift_code"])
+            extra=st.checkbox("Additional operator available",bool(extra_default))
             bulk=st.checkbox("Dedicated bulk operator available",bool(existing["bulk_operator_available"]) if existing else (shift["shift_code"]=="days"),disabled=shift["shift_code"]!="days")
             if shift["shift_code"]!="days": bulk=False
             note=st.text_input("Notes",value=existing.get("notes","") if existing else "")
