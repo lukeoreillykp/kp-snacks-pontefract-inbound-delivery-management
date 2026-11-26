@@ -100,19 +100,19 @@ def team_shift_for_date(team_colour, on_date):
         return None
 
 def individual_shift_for_date(staff_name, on_date):
-    if str(staff_name).strip().lower() != "carl everitt": return None
     config=one("app_settings",setting_key="individual_staff_rotas")
     config=(config or {}).get("setting_value") or {}
-    details=(config.get("carl everitt") or {})
+    staff_key=str(staff_name or "").strip().lower()
+    details=(config.get(staff_key) or {})
+    if not details: return None
     try:
         weeks=(on_date-date.fromisoformat(details["anchor_week_start"])).days//7
         current=details.get("shift")
         rotation=details.get("rotation") or {"days":"afternoons","afternoons":"days"}
-        for _ in range(weeks % 2): current=rotation.get(current,current)
+        for _ in range(weeks % len(rotation)): current=rotation.get(current,current)
         return current
     except Exception:
         return None
-
 def dedicated_bulk_staff_for_shift(shift_code, on_date):
     """Return dedicated bulk operators rostered on this shift and not absent."""
     available=[]
@@ -125,7 +125,7 @@ def dedicated_bulk_staff_for_shift(shift_code, on_date):
         team_colour=person.get("team_colour")
         team_shift=team_shift_for_date(team_colour,on_date) if team_colour else None
         allowed=person.get("allowed_shift_codes") or []
-        rostered=individual_shift or team_shift or (shift_code if allowed and shift_code in allowed else None)
+        rostered=individual_shift or team_shift or (allowed[0] if len(allowed)==1 else None)
         if rostered!=shift_code:
             continue
         absent=any(
