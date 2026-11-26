@@ -165,6 +165,11 @@ def portal(supplier):
                     po=st.selectbox("Purchase order",available,format_func=lambda x:x["po_number"])
                     product=products.get(po["product_id"])
                     st.write(f"**Product:** {product['name'] if product else '—'}")
+                    selected_rule=one("product_rules",product_id=po["product_id"])
+                    selected_area=one("delivery_areas",id=selected_rule["delivery_area_id"]) if selected_rule else None
+                    unload_minutes=int(selected_rule.get("standard_duration_minutes",60)) if selected_rule else 60
+                    buffer_minutes=int(selected_rule.get("buffer_minutes") if selected_rule and selected_rule.get("buffer_minutes") is not None else (selected_area or {}).get("buffer_minutes",20))
+                    st.caption(f"Planned offload: {unload_minutes} minutes, plus {buffer_minutes} minutes clearance buffer. The full period must fit within staffed shift hours.")
                     st.write(f"**PO quantity:** {po.get('quantity') if po.get('quantity') is not None else 'Not specified'} {po.get('quantity_unit') or ''}")
                     earliest=now().date()+timedelta(days=7)
                     if po.get("due_date"):
