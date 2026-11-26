@@ -21,7 +21,7 @@ def arrival_page(db, role):
     else:
         st.success("All confirmed deliveries have an arrival confirmation recorded.")
     bookings = _rows(db, "bookings")
-    eligible = [b for b in bookings if b.get("status") == "confirmed" and not b.get("actual_arrival_at")]
+    eligible = [b for b in bookings if b.get("status") in ("confirmed", "completed") and not b.get("actual_arrival_at")]
     eligible.sort(key=lambda b: b.get("scheduled_start") or "")
     if not eligible:
         st.info("There are no outstanding confirmed deliveries to record.")
