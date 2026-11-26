@@ -43,24 +43,7 @@ def arrival_page(db, role):
             patch = {"actual_arrival_at": stamp, "quantity_correct": correct=="Yes", "quantity_received": None if correct=="Yes" else received, "quantity_discrepancy_notes": None if correct=="Yes" else notes.strip(), "updated_at": datetime.now(TZ).isoformat()}
             db.table("bookings").update(patch).eq("id", selected["id"]).execute()
             db.table("booking_events").insert({"booking_id":selected["id"],"event_type":"arrival_confirmed","actor_label":role,"reason":None if correct=="Yes" else notes.strip(),"details":{"actual_arrival_at":stamp,"quantity_correct":correct=="Yes","quantity_received":None if correct=="Yes" else received}}).execute()
-            if supplier.get("contact_email"):
-                db.table("email_outbox").insert({
-                    "booking_id":selected["id"],
-                    "recipient_email":supplier["contact_email"],
-                    "subject":f"Inbound delivery {selected['booking_reference']} has arrived – KP Snacks Pontefract",
-                    "template_key":"booking_arrived",
-                    "payload":{
-                        "booking_reference":selected["booking_reference"],
-                        "supplier":supplier.get("name",""),
-                        "product":product.get("name",""),
-                        "status":"Has arrived on site",
-                        "actual_arrival_at":stamp,
-                        "quantity_correct":"Yes" if correct=="Yes" else "No",
-                        "quantity_received":None if correct=="Yes" else received,
-                        "reason":None if correct=="Yes" else notes.strip()
-                    }
-                }).execute()
-            st.success("Arrival confirmation saved and supplier email queued." if supplier.get("contact_email") else "Arrival confirmation saved. No supplier email address is recorded, so no email was queued.")
+            st.success("Arrival confirmation saved.")
             st.rerun()
     st.divider()
     render_documents(db, selected, selected["supplier_id"], can_upload=False)
