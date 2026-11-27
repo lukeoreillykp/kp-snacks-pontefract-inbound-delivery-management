@@ -54,6 +54,7 @@ def build_message(item):
         ("scheduled_start", "Scheduled arrival"),
         ("proposed_start", "Proposed arrival"),
         ("reason", "Details"),
+        ("test_routing_note", "Original supplier recipient (test redirect)"),
     ):
         value = payload.get(key)
         if value:
@@ -203,6 +204,24 @@ def main():
     endpoint = f"{base}/rest/v1/email_outbox?{query}"
     process_arrival_reminders(base,key)
     pending = request_json(endpoint, key) or []
+    email_test_mode = setting_value(base, key, "email_test_mode", {}) or {}
+    supplier_redirect = (
+        email_test_mode.get("enabled") is True
+        and email_test_mode.get("redirect_supplier_emails") is True
+        and bool(email_test_mode.get("recipient_email"))
+    )
+    supplier_templates = {"booking_status", "purchase_order_added"}
+    if supplier_redirect:
+        test_recipient = email_test_mode["recipient_email"].strip()
+        for item in pending:
+            if item.get("template_key") in supplier_templates:
+                original_recipient = item.get("recipient_email", "")
+                item["recipient_email"] = test_recipient
+                item["cc_email"] = None
+                item["subject"] = "[TEST ROUTED] " + item.get("subject", "")
+                payload = item.get("payload") or {}
+                payload["test_routing_note"] = original_recipient
+                item["payload"] = payload
     if not pending:
         print("Email queue checked: no queued messages.")
         return
