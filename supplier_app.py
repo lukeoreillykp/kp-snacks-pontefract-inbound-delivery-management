@@ -73,13 +73,24 @@ def dispatch_email_outbox(limit=10):
     except Exception:
         return 0
     sent=0
+    try:
+        test_setting=db().table("app_settings").select("setting_value").eq("setting_key","email_test_mode").limit(1).execute().data or []
+        test_mode=(test_setting[0].get("setting_value") or {}) if test_setting else {}
+    except Exception:
+        test_mode={}
+    supplier_redirect=(test_mode.get("enabled") is True and test_mode.get("redirect_supplier_emails") is True and bool(test_mode.get("recipient_email")))
+    supplier_templates={"booking_status","purchase_order_added"}
     for item in pending:
         message=EmailMessage()
         message["From"]=sender
-        message["To"]=item["recipient_email"]
-        message["Subject"]=item["subject"]
+        original_recipient=item["recipient_email"]
+        is_supplier_email=supplier_redirect and item.get("template_key") in supplier_templates
+        message["To"]=test_mode["recipient_email"].strip() if is_supplier_email else original_recipient
+        message["Subject"]=("[TEST ROUTED] " if is_supplier_email else "")+item["subject"]
         payload=item.get("payload") or {}
-        labels=(("booking_reference","Booking reference"),("supplier","Supplier"),("product","Product"),("status","Status"),("scheduled_start","Scheduled arrival"),("proposed_start","Proposed arrival"),("reason","Details"))
+        if is_supplier_email:
+            payload["test_routing_note"]=original_recipient
+        labels=(("booking_reference","Booking reference"),("supplier","Supplier"),("product","Product"),("status","Status"),("scheduled_start","Scheduled arrival"),("proposed_start","Proposed arrival"),("reason","Details"),("test_routing_note","Original supplier recipient (test redirect)"))
         details=[f"{label}: {payload[key]}" for key,label in labels if payload.get(key)]
         message.set_content("KP Snacks Pontefract inbound delivery notification\n\n"+("\n".join(details) if details else "There is an update in the inbound delivery management system.")+"\n\nThis is an automated notification. Please use the inbound delivery management app for the latest information.")
         try:
